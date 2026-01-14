@@ -57,6 +57,11 @@ export function ServerNodesSettings() {
     }
   };
 
+  const osIcons = {
+    linux: "🐧",
+    windows: "🪟",
+  };
+
   const statusIcons = {
     online: <Wifi className="h-4 w-4 text-success" />,
     offline: <WifiOff className="h-4 w-4 text-destructive" />,
@@ -113,6 +118,7 @@ export function ServerNodesSettings() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Status</TableHead>
+                  <TableHead>OS</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Host</TableHead>
                   <TableHead>Benutzer</TableHead>
@@ -128,6 +134,11 @@ export function ServerNodesSettings() {
                         {statusIcons[node.status]}
                         <span className="text-sm">{statusLabels[node.status]}</span>
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-xl" title={node.os_type === "windows" ? "Windows" : "Linux"}>
+                        {osIcons[node.os_type || "linux"]}
+                      </span>
                     </TableCell>
                     <TableCell className="font-medium">{node.name}</TableCell>
                     <TableCell className="font-mono text-sm">

@@ -11,6 +11,7 @@ export interface ServerNode {
   port: number;
   username: string;
   auth_type: "password" | "key";
+  os_type: "linux" | "windows";
   game_path: string;
   status: "online" | "offline" | "unknown" | "error";
   last_check: string | null;
@@ -24,6 +25,7 @@ export interface CreateNodeInput {
   port: number;
   username: string;
   auth_type: "password" | "key";
+  os_type: "linux" | "windows";
   game_path: string;
 }
 
@@ -60,6 +62,7 @@ export function useServerNodes() {
           port: input.port,
           username: input.username,
           auth_type: input.auth_type,
+          os_type: input.os_type,
           game_path: input.game_path,
           status: "unknown",
         })
