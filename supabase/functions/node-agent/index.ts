@@ -191,7 +191,7 @@ async function handleCommandResult(req: Request): Promise<Response> {
         await supabase
           .from('server_instances')
           .update({ 
-            status: success ? 'installed' : 'error',
+            status: success ? 'offline' : 'error',
             install_path: result.output.installPath
           })
           .eq('id', command.command_data.serverId);
