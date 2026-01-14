@@ -10,9 +10,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useServerNodes, ServerNode } from "@/hooks/useServerNodes";
-import { Loader2, Server, Key, Lock, Copy, Check, ExternalLink } from "lucide-react";
+import { Loader2, Server, Key, Lock, Copy, Check, Download, Zap } from "lucide-react";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 interface AddNodeDialogProps {
   open: boolean;
@@ -29,6 +31,9 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
   const [osType, setOsType] = useState<"linux" | "windows">("linux");
   const [gamePath, setGamePath] = useState("/home/gameserver");
   const [copied, setCopied] = useState(false);
+  const [connectionMethod, setConnectionMethod] = useState<"agent" | "manual">("agent");
+  const [isGeneratingAgent, setIsGeneratingAgent] = useState(false);
+  const [agentScript, setAgentScript] = useState<string | null>(null);
 
   const { createNode, updateNode } = useServerNodes();
 
@@ -50,12 +55,14 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
     if (!editNode) {
       if (osType === "windows") {
         setGamePath("C:\\GameServers");
-        setPort(3389); // RDP port - simpler for users to understand
+        setPort(3389);
         setUsername("Administrator");
+        setConnectionMethod("agent");
       } else {
         setGamePath("/home/gameserver");
         setPort(22);
         setUsername("");
+        setConnectionMethod("manual");
       }
     }
   }, [osType, editNode]);
@@ -63,6 +70,8 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    let nodeId: string | undefined;
+
     if (editNode) {
       await updateNode.mutateAsync({
         id: editNode.id,
@@ -74,8 +83,9 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
         os_type: osType,
         game_path: gamePath,
       });
+      nodeId = editNode.id;
     } else {
-      await createNode.mutateAsync({
+      const result = await createNode.mutateAsync({
         name,
         host,
         port,
@@ -84,9 +94,52 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
         os_type: osType,
         game_path: gamePath,
       });
+      nodeId = result?.id;
     }
     
-    handleClose();
+    // If Windows with agent method, generate agent script
+    if (osType === "windows" && connectionMethod === "agent" && nodeId && !editNode) {
+      await generateAgentScript(nodeId);
+    } else {
+      handleClose();
+    }
+  };
+
+  const generateAgentScript = async (nodeId: string) => {
+    setIsGeneratingAgent(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('node-agent', {
+        body: { nodeId }
+      });
+
+      if (error) throw error;
+
+      if (data?.installScript) {
+        setAgentScript(data.installScript);
+        toast.success("Agent-Script generiert!");
+      }
+    } catch (error) {
+      console.error('Error generating agent:', error);
+      toast.error("Fehler beim Generieren des Agent-Scripts");
+      handleClose();
+    } finally {
+      setIsGeneratingAgent(false);
+    }
+  };
+
+  const downloadAgentScript = () => {
+    if (!agentScript) return;
+    
+    const blob = new Blob([agentScript], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `GameServerAgent-${name.replace(/\s+/g, '_')}.ps1`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success("Script heruntergeladen!");
   };
 
   const handleClose = () => {
@@ -98,6 +151,8 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
     setOsType("linux");
     setGamePath("/home/gameserver");
     setCopied(false);
+    setAgentScript(null);
+    setConnectionMethod("agent");
     onOpenChange(false);
   };
 
@@ -108,13 +163,81 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const isPending = createNode.isPending || updateNode.isPending;
+  const isPending = createNode.isPending || updateNode.isPending || isGeneratingAgent;
 
-  // PowerShell command to enable WinRM (simplified)
-  const winrmSetupCommand = `# Als Administrator ausführen:
-Enable-PSRemoting -Force
-Set-Item wsman:\\localhost\\client\\trustedhosts -Value "*" -Force
-New-NetFirewallRule -Name "GamePanel" -DisplayName "GamePanel Remote" -Direction Inbound -LocalPort 5985 -Protocol TCP -Action Allow`;
+  // If agent script is ready, show download dialog
+  if (agentScript) {
+    return (
+      <Dialog open={open} onOpenChange={handleClose}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Zap className="h-5 w-5 text-green-500" />
+              Agent-Installation
+            </DialogTitle>
+            <DialogDescription>
+              Server "{name}" wurde hinzugefügt. Installiere jetzt den Agent.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
+              <div className="flex items-start gap-3">
+                <div className="text-2xl">✅</div>
+                <div>
+                  <p className="font-medium">Server erfolgreich hinzugefügt!</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Jetzt muss nur noch der Agent auf deinem Windows Server installiert werden.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-sm font-medium">So geht's:</p>
+              <ol className="text-sm space-y-2 text-muted-foreground">
+                <li className="flex gap-2">
+                  <span className="font-bold text-foreground">1.</span>
+                  Lade das Installations-Script herunter
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-bold text-foreground">2.</span>
+                  Kopiere es auf deinen Windows Server
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-bold text-foreground">3.</span>
+                  Rechtsklick → "Mit PowerShell ausführen (als Admin)"
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-bold text-foreground">4.</span>
+                  Fertig! Der Agent verbindet sich automatisch.
+                </li>
+              </ol>
+            </div>
+
+            <div className="flex gap-2">
+              <Button onClick={downloadAgentScript} className="flex-1">
+                <Download className="h-4 w-4 mr-2" />
+                Script herunterladen
+              </Button>
+              <Button 
+                variant="outline" 
+                onClick={() => copyToClipboard(agentScript)}
+              >
+                {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              </Button>
+            </div>
+
+            <div className="pt-2">
+              <Button variant="ghost" className="w-full" onClick={handleClose}>
+                Fertig
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -167,35 +290,49 @@ New-NetFirewallRule -Name "GamePanel" -DisplayName "GamePanel Remote" -Direction
             </RadioGroup>
           </div>
 
-          {/* Windows Setup Instructions */}
+          {/* Windows Connection Method */}
           {osType === "windows" && !editNode && (
-            <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg space-y-3">
-              <div className="flex items-start gap-2">
-                <span className="text-lg">💡</span>
-                <div>
-                  <p className="font-medium text-sm">Einfache Windows-Einrichtung</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Führe diesen Befehl einmalig auf deinem Windows Server aus (PowerShell als Administrator):
-                  </p>
-                </div>
-              </div>
-              <div className="relative">
-                <pre className="bg-black/80 text-green-400 p-3 rounded text-xs overflow-x-auto">
-                  {winrmSetupCommand}
-                </pre>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="absolute top-2 right-2"
-                  onClick={() => copyToClipboard(winrmSetupCommand)}
-                >
-                  {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Nach Ausführung ist dein Server bereit für die Verbindung.
-              </p>
+            <div className="space-y-3">
+              <Label>Verbindungsmethode</Label>
+              <Tabs value={connectionMethod} onValueChange={(v) => setConnectionMethod(v as "agent" | "manual")}>
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="agent" className="flex items-center gap-2">
+                    <Zap className="h-4 w-4" />
+                    Agent (Empfohlen)
+                  </TabsTrigger>
+                  <TabsTrigger value="manual" className="flex items-center gap-2">
+                    <Server className="h-4 w-4" />
+                    Manuell
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="agent" className="mt-3">
+                  <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <span className="text-lg">✨</span>
+                      <div>
+                        <p className="font-medium text-sm">Einfachste Methode</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Ein kleines Script wird auf deinem Windows Server installiert und verbindet sich automatisch. 
+                          <strong> Keine Firewall-Konfiguration nötig!</strong>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </TabsContent>
+                <TabsContent value="manual" className="mt-3">
+                  <div className="p-4 bg-muted/50 border border-border rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <span className="text-lg">⚙️</span>
+                      <div>
+                        <p className="font-medium text-sm">Manuelle Konfiguration</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Erfordert WinRM-Einrichtung und Firewall-Freigaben.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </TabsContent>
+              </Tabs>
             </div>
           )}
 
@@ -305,11 +442,14 @@ New-NetFirewallRule -Name "GamePanel" -DisplayName "GamePanel Remote" -Direction
           </div>
 
           {/* Quick Info */}
-          <div className="p-3 bg-muted/50 rounded-lg">
-            <p className="text-xs text-muted-foreground">
-              <strong>Tipp:</strong> Nach dem Hinzufügen kannst du die Verbindung mit dem Test-Button (🔄) überprüfen.
-            </p>
-          </div>
+          {osType === "windows" && connectionMethod === "agent" && !editNode && (
+            <div className="p-3 bg-primary/5 border border-primary/20 rounded-lg">
+              <p className="text-xs text-muted-foreground">
+                <strong>Nächster Schritt:</strong> Nach dem Hinzufügen erhältst du ein Installations-Script, 
+                das du einfach auf deinem Windows Server ausführst.
+              </p>
+            </div>
+          )}
 
           {/* Actions */}
           <div className="flex justify-end gap-2 pt-2">
@@ -320,10 +460,15 @@ New-NetFirewallRule -Name "GamePanel" -DisplayName "GamePanel Remote" -Direction
               {isPending ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Speichern...
+                  {isGeneratingAgent ? "Generiere Agent..." : "Speichern..."}
                 </>
               ) : editNode ? (
                 "Speichern"
+              ) : osType === "windows" && connectionMethod === "agent" ? (
+                <>
+                  <Zap className="h-4 w-4 mr-2" />
+                  Weiter zur Agent-Installation
+                </>
               ) : (
                 "Server hinzufügen"
               )}

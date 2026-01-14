@@ -114,6 +114,8 @@ export type Database = {
       }
       server_nodes: {
         Row: {
+          agent_connected_at: string | null
+          agent_token: string | null
           auth_type: string | null
           created_at: string
           game_path: string | null
@@ -129,6 +131,8 @@ export type Database = {
           username: string
         }
         Insert: {
+          agent_connected_at?: string | null
+          agent_token?: string | null
           auth_type?: string | null
           created_at?: string
           game_path?: string | null
@@ -144,6 +148,8 @@ export type Database = {
           username: string
         }
         Update: {
+          agent_connected_at?: string | null
+          agent_token?: string | null
           auth_type?: string | null
           created_at?: string
           game_path?: string | null

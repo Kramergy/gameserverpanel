@@ -2,3 +2,6 @@ project_id = "ouvgvyxkclzfpaucjydm"
 
 [functions.test-node-connection]
 verify_jwt = false
+
+[functions.node-agent]
+verify_jwt = false
