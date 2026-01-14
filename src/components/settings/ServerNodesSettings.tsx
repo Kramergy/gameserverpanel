@@ -233,7 +233,7 @@ export function ServerNodesSettings() {
                           size="icon"
                           onClick={() => setCommandNode(node)}
                           title="Befehle senden"
-                          disabled={node.os_type !== 'windows'}
+                          disabled={node.status !== 'online'}
                         >
                           <Terminal className="h-4 w-4" />
                         </Button>

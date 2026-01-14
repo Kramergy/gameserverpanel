@@ -50,7 +50,7 @@ const COMMAND_TYPES = [
   { value: "get_processes", label: "Prozesse auflisten", icon: Terminal, description: "Zeige laufende Prozesse" },
   { value: "start_process", label: "Prozess starten", icon: Play, description: "Starte eine Anwendung" },
   { value: "stop_process", label: "Prozess stoppen", icon: Square, description: "Beende eine Anwendung" },
-  { value: "run_script", label: "Script ausführen", icon: Terminal, description: "Führe PowerShell aus" },
+  { value: "run_script", label: "Script ausführen", icon: Terminal, description: "Shell-Script ausführen" },
 ];
 
 export function NodeCommandDialog({ open, onOpenChange, node }: NodeCommandDialogProps) {
@@ -265,12 +265,17 @@ export function NodeCommandDialog({ open, onOpenChange, node }: NodeCommandDialo
 
           {commandType === "run_script" && (
             <div className="space-y-2">
-              <Label htmlFor="script">PowerShell Script</Label>
+              <Label htmlFor="script">
+                {node?.os_type === 'windows' ? 'PowerShell Script' : 'Bash Script'}
+              </Label>
               <Textarea
                 id="script"
                 value={commandData.script || ""}
                 onChange={(e) => setCommandData({ ...commandData, script: e.target.value })}
-                placeholder="Get-Process | Where-Object { $_.Name -like '*minecraft*' }"
+                placeholder={node?.os_type === 'windows' 
+                  ? "Get-Process | Where-Object { $_.Name -like '*minecraft*' }"
+                  : "ps aux | grep minecraft"
+                }
                 rows={4}
                 className="font-mono text-sm"
                 required

@@ -63,8 +63,8 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
       } else {
         setGamePath("/home/gameserver");
         setPort(22);
-        setUsername("");
-        setConnectionMethod("manual");
+        setUsername("root");
+        setConnectionMethod("agent");
       }
     }
   }, [osType, editNode]);
@@ -112,8 +112,8 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
       nodeId = result?.id;
     }
     
-    // If Windows with agent method, generate agent script
-    if (osType === "windows" && connectionMethod === "agent" && nodeId && !editNode) {
+    // If using agent method, generate agent script
+    if (connectionMethod === "agent" && nodeId && !editNode) {
       await generateAgentScript(nodeId);
     } else {
       handleClose();
@@ -149,7 +149,9 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `GameServerAgent-${name.replace(/\s+/g, '_')}.ps1`;
+    // Use .ps1 for Windows, .sh for Linux
+    const extension = osType === 'windows' ? 'ps1' : 'sh';
+    a.download = `GameServerAgent-${name.replace(/\s+/g, '_')}.${extension}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -203,7 +205,7 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
                 <div>
                   <p className="font-medium">Server erfolgreich hinzugefügt!</p>
                   <p className="text-sm text-muted-foreground mt-1">
-                    Jetzt muss nur noch der Agent auf deinem Windows Server installiert werden.
+                    Jetzt muss nur noch der Agent auf deinem {osType === 'windows' ? 'Windows' : 'Linux'} Server installiert werden.
                   </p>
                 </div>
               </div>
@@ -211,24 +213,45 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
 
             <div className="space-y-3">
               <p className="text-sm font-medium">So geht's:</p>
-              <ol className="text-sm space-y-2 text-muted-foreground">
-                <li className="flex gap-2">
-                  <span className="font-bold text-foreground">1.</span>
-                  Lade das Installations-Script herunter
-                </li>
-                <li className="flex gap-2">
-                  <span className="font-bold text-foreground">2.</span>
-                  Kopiere es auf deinen Windows Server
-                </li>
-                <li className="flex gap-2">
-                  <span className="font-bold text-foreground">3.</span>
-                  Rechtsklick → "Mit PowerShell ausführen (als Admin)"
-                </li>
-                <li className="flex gap-2">
-                  <span className="font-bold text-foreground">4.</span>
-                  Fertig! Der Agent verbindet sich automatisch.
-                </li>
-              </ol>
+              {osType === 'windows' ? (
+                <ol className="text-sm space-y-2 text-muted-foreground">
+                  <li className="flex gap-2">
+                    <span className="font-bold text-foreground">1.</span>
+                    Lade das Installations-Script herunter
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="font-bold text-foreground">2.</span>
+                    Kopiere es auf deinen Windows Server
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="font-bold text-foreground">3.</span>
+                    Rechtsklick → "Mit PowerShell ausführen (als Admin)"
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="font-bold text-foreground">4.</span>
+                    Fertig! Der Agent verbindet sich automatisch.
+                  </li>
+                </ol>
+              ) : (
+                <ol className="text-sm space-y-2 text-muted-foreground">
+                  <li className="flex gap-2">
+                    <span className="font-bold text-foreground">1.</span>
+                    Kopiere den Befehl unten oder lade das Script herunter
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="font-bold text-foreground">2.</span>
+                    Verbinde dich per SSH mit deinem Linux Server
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="font-bold text-foreground">3.</span>
+                    Führe das Script als root aus: <code className="bg-muted px-1 rounded">sudo bash install.sh</code>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="font-bold text-foreground">4.</span>
+                    Fertig! Der Agent verbindet sich automatisch.
+                  </li>
+                </ol>
+              )}
             </div>
 
             <div className="flex gap-2">
