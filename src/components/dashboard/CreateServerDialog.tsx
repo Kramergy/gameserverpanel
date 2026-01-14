@@ -9,15 +9,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { GameSelector, GameOption } from "./GameSelector";
 import { useServerInstances } from "@/hooks/useServerInstances";
+import { useGameServerInstall } from "@/hooks/useGameServerInstall";
 import { useServerNodes } from "@/hooks/useServerNodes";
 import { Loader2, Server, ArrowLeft, AlertCircle } from "lucide-react";
 
@@ -36,6 +30,7 @@ function CreateServerDialogContent({ onOpenChange }: { onOpenChange: (open: bool
   const [ram, setRam] = useState(2048);
 
   const { createServer } = useServerInstances();
+  const { installServer } = useGameServerInstall();
   const { nodes, isLoading: nodesLoading } = useServerNodes();
 
   // Filter only online nodes
@@ -65,7 +60,8 @@ function CreateServerDialogContent({ onOpenChange }: { onOpenChange: (open: bool
   const handleCreate = async () => {
     if (!selectedGame || !selectedNodeId) return;
 
-    await createServer.mutateAsync({
+    // Create server instance in database
+    const server = await createServer.mutateAsync({
       name: serverName,
       game: selectedGame.id,
       game_icon: selectedGame.icon,
@@ -74,6 +70,19 @@ function CreateServerDialogContent({ onOpenChange }: { onOpenChange: (open: bool
       ram_allocated: ram,
       node_id: selectedNodeId,
     });
+
+    // Trigger installation on the agent
+    if (server?.id) {
+      await installServer.mutateAsync({
+        serverId: server.id,
+        nodeId: selectedNodeId,
+        game: selectedGame,
+        serverName,
+        port,
+        maxPlayers,
+        ram,
+      });
+    }
 
     // Reset and close
     setStep("node");
@@ -84,6 +93,7 @@ function CreateServerDialogContent({ onOpenChange }: { onOpenChange: (open: bool
   };
 
   const selectedNode = nodes.find(n => n.id === selectedNodeId);
+  const isCreating = createServer.isPending || installServer.isPending;
 
   return (
     <>
@@ -231,15 +241,15 @@ function CreateServerDialogContent({ onOpenChange }: { onOpenChange: (open: bool
             </Button>
             <Button
               onClick={handleCreate}
-              disabled={!serverName || createServer.isPending}
+              disabled={!serverName || isCreating}
             >
-              {createServer.isPending ? (
+              {isCreating ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Erstelle...
+                  Installation wird gestartet...
                 </>
               ) : (
-                "Server erstellen"
+                "Server installieren"
               )}
             </Button>
           </div>

@@ -517,6 +517,166 @@ function Execute-Command {
                 $result.success = $true
                 $result.output = $procs
             }
+            "install_gameserver" {
+                # Game server installation command
+                $gameId = $commandData.gameId
+                $serverName = $commandData.serverName
+                $serverId = $commandData.serverId
+                $installPath = "$gamePath\\$gameId-$serverId"
+                $installType = $commandData.installType
+                $steamAppId = $commandData.steamAppId
+                $downloadUrl = $commandData.downloadUrl
+                $executable = $commandData.executable
+                $port = $commandData.port
+                $maxPlayers = $commandData.maxPlayers
+                $ram = $commandData.ram
+                $startArgs = $commandData.startArgs
+
+                # Send progress update
+                function Send-Progress {
+                    param($stage, $percent, $message)
+                    $progress = @{
+                        type = "install_progress"
+                        serverId = $serverId
+                        stage = $stage
+                        percent = $percent
+                        message = $message
+                    } | ConvertTo-Json -Depth 5
+                    Send-Message -ws $ws -message $progress -cts $cts
+                }
+
+                try {
+                    Send-Progress -stage "init" -percent 5 -message "Installation wird vorbereitet..."
+                    
+                    # Create install directory
+                    New-Item -ItemType Directory -Force -Path $installPath | Out-Null
+                    
+                    switch ($installType) {
+                        "steamcmd" {
+                            # Install via SteamCMD
+                            $steamCmdPath = "$gamePath\\SteamCMD"
+                            
+                            # Check if SteamCMD exists, if not download it
+                            if (-not (Test-Path "$steamCmdPath\\steamcmd.exe")) {
+                                Send-Progress -stage "steamcmd" -percent 10 -message "SteamCMD wird heruntergeladen..."
+                                New-Item -ItemType Directory -Force -Path $steamCmdPath | Out-Null
+                                $steamZip = "$steamCmdPath\\steamcmd.zip"
+                                Invoke-WebRequest -Uri "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip" -OutFile $steamZip
+                                Expand-Archive -Path $steamZip -DestinationPath $steamCmdPath -Force
+                                Remove-Item $steamZip -Force
+                            }
+                            
+                            Send-Progress -stage "download" -percent 20 -message "Gameserver wird heruntergeladen (Steam App $steamAppId)..."
+                            
+                            # Run SteamCMD to download game server
+                            $steamArgs = '+force_install_dir "' + $installPath + '" +login anonymous +app_update ' + $steamAppId + ' validate +quit'
+                            $steamProcess = Start-Process -FilePath "$steamCmdPath\\steamcmd.exe" -ArgumentList $steamArgs -Wait -PassThru -NoNewWindow
+                            
+                            if ($steamProcess.ExitCode -ne 0 -and $steamProcess.ExitCode -ne 7) {
+                                throw "SteamCMD failed with exit code: $($steamProcess.ExitCode)"
+                            }
+                        }
+                        "direct" {
+                            # Direct download (e.g., Minecraft Bedrock)
+                            Send-Progress -stage "download" -percent 20 -message "Server-Dateien werden heruntergeladen..."
+                            
+                            $fileName = [System.IO.Path]::GetFileName($downloadUrl)
+                            $downloadPath = "$installPath\\$fileName"
+                            Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath
+                            
+                            # If it's a zip, extract it
+                            if ($fileName -like "*.zip") {
+                                Send-Progress -stage "extract" -percent 50 -message "Dateien werden entpackt..."
+                                Expand-Archive -Path $downloadPath -DestinationPath $installPath -Force
+                                Remove-Item $downloadPath -Force
+                            }
+                        }
+                        "java" {
+                            # Java server (Minecraft Java)
+                            Send-Progress -stage "download" -percent 20 -message "Server JAR wird heruntergeladen..."
+                            
+                            # Check if Java is installed
+                            $javaPath = (Get-Command java -ErrorAction SilentlyContinue).Path
+                            if (-not $javaPath) {
+                                Send-Progress -stage "java" -percent 25 -message "Java wird installiert..."
+                                # Download and install OpenJDK
+                                $jdkUrl = "https://download.java.net/java/GA/jdk21.0.1/415e3f918a1f4062a0074a2794853d0d/12/GPL/openjdk-21.0.1_windows-x64_bin.zip"
+                                $jdkZip = "$gamePath\\openjdk.zip"
+                                $jdkPath = "$gamePath\\jdk"
+                                Invoke-WebRequest -Uri $jdkUrl -OutFile $jdkZip
+                                Expand-Archive -Path $jdkZip -DestinationPath $jdkPath -Force
+                                Remove-Item $jdkZip -Force
+                                $javaPath = Get-ChildItem -Path $jdkPath -Recurse -Filter "java.exe" | Select-Object -First 1 -ExpandProperty FullName
+                            }
+                            
+                            # Download server.jar
+                            $jarPath = "$installPath\\server.jar"
+                            Invoke-WebRequest -Uri $downloadUrl -OutFile $jarPath
+                            
+                            # Create eula.txt
+                            Set-Content -Path "$installPath\\eula.txt" -Value "eula=true"
+                            
+                            # Create start script
+                            $ramMb = $ram
+                            $startScript = "@echo off" + [char]10 + "java -Xmx" + $ramMb + "M -Xms" + $ramMb + "M -jar server.jar nogui"
+                            Set-Content -Path "$installPath\\start.bat" -Value $startScript
+                        }
+                    }
+                    
+                    Send-Progress -stage "config" -percent 80 -message "Server wird konfiguriert..."
+                    
+                    # Create server info file
+                    $serverInfo = @{
+                        gameId = $gameId
+                        serverName = $serverName
+                        serverId = $serverId
+                        port = $port
+                        maxPlayers = $maxPlayers
+                        ram = $ram
+                        executable = $executable
+                        startArgs = $startArgs
+                        installPath = $installPath
+                        installedAt = (Get-Date).ToString("o")
+                    } | ConvertTo-Json -Depth 5
+                    Set-Content -Path "$installPath\\server_info.json" -Value $serverInfo
+                    
+                    # Create start script
+                    $finalStartArgs = $startArgs -replace "{PORT}", $port -replace "{MAXPLAYERS}", $maxPlayers -replace "{NAME}", $serverName -replace "{RAM}", $ram
+                    $startBat = "@echo off" + [char]10 + "cd /d " + [char]34 + $installPath + [char]34 + [char]10 + [char]34 + $installPath + "\\" + $executable + [char]34 + " " + $finalStartArgs
+                    Set-Content -Path "$installPath\\start_server.bat" -Value $startBat
+                    
+                    Send-Progress -stage "complete" -percent 100 -message "Installation abgeschlossen!"
+                    
+                    $result.success = $true
+                    $result.output = @{
+                        installPath = $installPath
+                        executable = $executable
+                        startScript = "$installPath\\start_server.bat"
+                    }
+                } catch {
+                    $result.error = $_.Exception.Message
+                    Send-Progress -stage "error" -percent 0 -message "Fehler: $($_.Exception.Message)"
+                }
+            }
+            "start_gameserver" {
+                $serverId = $commandData.serverId
+                $installPath = $commandData.installPath
+                $startScript = "$installPath\\start_server.bat"
+                
+                if (Test-Path $startScript) {
+                    $proc = Start-Process -FilePath "cmd.exe" -ArgumentList ("/c " + [char]34 + $startScript + [char]34) -WorkingDirectory $installPath -PassThru
+                    $result.success = $true
+                    $result.output = @{ pid = $proc.Id; serverId = $serverId }
+                } else {
+                    $result.error = "Start script not found: $startScript"
+                }
+            }
+            "stop_gameserver" {
+                $executable = $commandData.executable
+                Stop-Process -Name ([System.IO.Path]::GetFileNameWithoutExtension($executable)) -Force -ErrorAction SilentlyContinue
+                $result.success = $true
+                $result.output = "Game server stopped"
+            }
             default {
                 $result.error = "Unknown command: $commandType"
             }

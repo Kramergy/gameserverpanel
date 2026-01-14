@@ -161,28 +161,75 @@ export function useServerInstances() {
   });
 
   const startServer = async (serverId: string) => {
+    const server = servers.find(s => s.id === serverId);
+    if (!server || !server.node_id) {
+      toast.error("Kein Server-Node zugewiesen");
+      return;
+    }
+
     toast.info("Server wird gestartet...");
     await updateServerStatus.mutateAsync({ serverId, status: "starting" });
-    // Simulate startup delay
-    setTimeout(async () => {
-      await updateServerStatus.mutateAsync({ serverId, status: "online" });
-      toast.success("Server gestartet!");
-    }, 2000);
+
+    try {
+      // Send start command to agent
+      const { error } = await supabase.functions.invoke("node-agent/send-command", {
+        body: {
+          nodeId: server.node_id,
+          commandType: "start_gameserver",
+          commandData: {
+            serverId,
+            installPath: server.install_path || `C:\\GameServers\\${server.game}-${serverId}`,
+          },
+        },
+      });
+
+      if (error) throw error;
+      
+      // Wait a bit then update status (in real app, agent would report back)
+      setTimeout(async () => {
+        await updateServerStatus.mutateAsync({ serverId, status: "online" });
+        toast.success("Server gestartet!");
+      }, 3000);
+    } catch (error: any) {
+      toast.error("Startfehler: " + error.message);
+      await updateServerStatus.mutateAsync({ serverId, status: "offline" });
+    }
   };
 
   const stopServer = async (serverId: string) => {
+    const server = servers.find(s => s.id === serverId);
+    if (!server || !server.node_id) {
+      toast.error("Kein Server-Node zugewiesen");
+      return;
+    }
+
     toast.info("Server wird gestoppt...");
-    await updateServerStatus.mutateAsync({ serverId, status: "offline" });
-    toast.success("Server gestoppt");
+
+    try {
+      // Get game info for executable
+      const { error } = await supabase.functions.invoke("node-agent/send-command", {
+        body: {
+          nodeId: server.node_id,
+          commandType: "stop_gameserver",
+          commandData: {
+            serverId,
+            executable: getExecutableForGame(server.game),
+          },
+        },
+      });
+
+      if (error) throw error;
+      
+      await updateServerStatus.mutateAsync({ serverId, status: "offline" });
+      toast.success("Server gestoppt");
+    } catch (error: any) {
+      toast.error("Stoppfehler: " + error.message);
+    }
   };
 
   const restartServer = async (serverId: string) => {
-    toast.info("Server wird neu gestartet...");
-    await updateServerStatus.mutateAsync({ serverId, status: "starting" });
-    setTimeout(async () => {
-      await updateServerStatus.mutateAsync({ serverId, status: "online" });
-      toast.success("Server neu gestartet!");
-    }, 3000);
+    await stopServer(serverId);
+    setTimeout(() => startServer(serverId), 2000);
   };
 
   return {
@@ -195,4 +242,19 @@ export function useServerInstances() {
     stopServer,
     restartServer,
   };
+}
+
+// Helper function to get executable name for a game
+function getExecutableForGame(gameId: string): string {
+  const executables: Record<string, string> = {
+    "minecraft-java": "java.exe",
+    "minecraft-bedrock": "bedrock_server.exe",
+    "ark": "ShooterGameServer.exe",
+    "rust": "RustDedicated.exe",
+    "valheim": "valheim_server.exe",
+    "terraria": "TerrariaServer.exe",
+    "cs2": "cs2.exe",
+    "palworld": "PalServer.exe",
+  };
+  return executables[gameId] || "server.exe";
 }
