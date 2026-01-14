@@ -1,21 +1,21 @@
-import { Server, Users, Cpu, HardDrive } from "lucide-react";
+import { Server, Users, Cpu, HardDrive, Loader2 } from "lucide-react";
 import { StatsCard } from "./StatsCard";
 import { ServerCard, ServerInstance } from "./ServerCard";
 import { ConsoleView } from "./ConsoleView";
 import { ResourceChart } from "./ResourceChart";
 import { PlayersOnline } from "./PlayersOnline";
-
-const servers: ServerInstance[] = [];
-
+import { useServerInstances } from "@/hooks/useServerInstances";
 interface DashboardProps {
   onServerSelect: (server: ServerInstance) => void;
 }
 
 export function Dashboard({ onServerSelect }: DashboardProps) {
+  const { servers, isLoading, startServer, stopServer, restartServer, deleteServer } = useServerInstances();
+  
   const onlineServers = servers.filter(s => s.status === "online").length;
-  const totalPlayers = servers.reduce((acc, s) => acc + s.players.current, 0);
-  const avgCpu = Math.round(servers.filter(s => s.status === "online").reduce((acc, s) => acc + s.cpu, 0) / onlineServers) || 0;
-  const avgRam = Math.round(servers.filter(s => s.status === "online").reduce((acc, s) => acc + s.ram, 0) / onlineServers) || 0;
+  const totalPlayers = servers.reduce((acc, s) => acc + s.current_players, 0);
+  const avgCpu = Math.round(servers.filter(s => s.status === "online").reduce((acc, s) => acc + s.cpu_usage, 0) / onlineServers) || 0;
+  const avgRam = Math.round(servers.filter(s => s.status === "online").reduce((acc, s) => acc + s.ram_usage, 0) / onlineServers) || 0;
 
   return (
     <div className="space-y-6">
@@ -57,7 +57,12 @@ export function Dashboard({ onServerSelect }: DashboardProps) {
       {/* Server Grid */}
       <div>
         <h2 className="text-xl font-semibold mb-4">Server Instanzen</h2>
-        {servers.length === 0 ? (
+        {isLoading ? (
+          <div className="text-center py-12 border border-dashed border-border rounded-lg">
+            <Loader2 className="h-12 w-12 mx-auto text-muted-foreground mb-4 animate-spin" />
+            <h3 className="text-lg font-medium">Lade Server...</h3>
+          </div>
+        ) : servers.length === 0 ? (
           <div className="text-center py-12 border border-dashed border-border rounded-lg">
             <Server className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
             <h3 className="text-lg font-medium">Keine Server vorhanden</h3>
@@ -70,8 +75,12 @@ export function Dashboard({ onServerSelect }: DashboardProps) {
             {servers.map((server) => (
               <ServerCard 
                 key={server.id} 
-                server={server} 
-                onSelect={onServerSelect}
+                server={server as ServerInstance}
+                onSelect={onServerSelect as (server: ServerInstance) => void}
+                onStart={startServer}
+                onStop={stopServer}
+                onRestart={restartServer}
+                onDelete={(id) => deleteServer.mutate(id)}
               />
             ))}
           </div>
