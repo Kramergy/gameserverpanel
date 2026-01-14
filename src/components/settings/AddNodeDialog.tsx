@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useServerNodes, ServerNode } from "@/hooks/useServerNodes";
-import { Loader2, Server, Key, Lock } from "lucide-react";
+import { Loader2, Server, Key, Lock, Monitor } from "lucide-react";
 
 interface AddNodeDialogProps {
   open: boolean;
@@ -20,14 +20,36 @@ interface AddNodeDialogProps {
 }
 
 export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogProps) {
-  const [name, setName] = useState(editNode?.name || "");
-  const [host, setHost] = useState(editNode?.host || "");
-  const [port, setPort] = useState(editNode?.port || 22);
-  const [username, setUsername] = useState(editNode?.username || "");
-  const [authType, setAuthType] = useState<"password" | "key">(editNode?.auth_type || "password");
-  const [gamePath, setGamePath] = useState(editNode?.game_path || "/home/gameserver");
+  const [name, setName] = useState("");
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState(22);
+  const [username, setUsername] = useState("");
+  const [authType, setAuthType] = useState<"password" | "key">("password");
+  const [osType, setOsType] = useState<"linux" | "windows">("linux");
+  const [gamePath, setGamePath] = useState("/home/gameserver");
 
   const { createNode, updateNode } = useServerNodes();
+
+  // Update form when editNode changes
+  useEffect(() => {
+    if (editNode) {
+      setName(editNode.name);
+      setHost(editNode.host);
+      setPort(editNode.port);
+      setUsername(editNode.username);
+      setAuthType(editNode.auth_type);
+      setOsType(editNode.os_type || "linux");
+      setGamePath(editNode.game_path);
+    }
+  }, [editNode]);
+
+  // Update default path when OS changes
+  useEffect(() => {
+    if (!editNode) {
+      setGamePath(osType === "windows" ? "C:\\GameServers" : "/home/gameserver");
+      setPort(osType === "windows" ? 5985 : 22);
+    }
+  }, [osType, editNode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,6 +62,7 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
         port,
         username,
         auth_type: authType,
+        os_type: osType,
         game_path: gamePath,
       });
     } else {
@@ -49,6 +72,7 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
         port,
         username,
         auth_type: authType,
+        os_type: osType,
         game_path: gamePath,
       });
     }
@@ -62,6 +86,7 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
     setPort(22);
     setUsername("");
     setAuthType("password");
+    setOsType("linux");
     setGamePath("/home/gameserver");
     onOpenChange(false);
   };
@@ -82,6 +107,46 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label>Betriebssystem</Label>
+            <RadioGroup 
+              value={osType} 
+              onValueChange={(v) => setOsType(v as "linux" | "windows")}
+              className="flex gap-4"
+            >
+              <div className="flex-1">
+                <label 
+                  htmlFor="linux" 
+                  className={`flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${
+                    osType === "linux" ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
+                  }`}
+                >
+                  <RadioGroupItem value="linux" id="linux" className="sr-only" />
+                  <div className="text-2xl">🐧</div>
+                  <div>
+                    <p className="font-medium">Linux</p>
+                    <p className="text-xs text-muted-foreground">SSH-Verbindung</p>
+                  </div>
+                </label>
+              </div>
+              <div className="flex-1">
+                <label 
+                  htmlFor="windows" 
+                  className={`flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${
+                    osType === "windows" ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
+                  }`}
+                >
+                  <RadioGroupItem value="windows" id="windows" className="sr-only" />
+                  <div className="text-2xl">🪟</div>
+                  <div>
+                    <p className="font-medium">Windows</p>
+                    <p className="text-xs text-muted-foreground">WinRM/PowerShell</p>
+                  </div>
+                </label>
+              </div>
+            </RadioGroup>
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="name">Name</Label>
             <Input
@@ -105,7 +170,7 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="port">SSH Port</Label>
+              <Label htmlFor="port">{osType === "windows" ? "WinRM Port" : "SSH Port"}</Label>
               <Input
                 id="port"
                 type="number"
@@ -123,7 +188,7 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
               id="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="gameserver"
+              placeholder={osType === "windows" ? "Administrator" : "gameserver"}
               required
             />
           </div>
@@ -138,13 +203,15 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
                   Passwort
                 </Label>
               </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="key" id="key" />
-                <Label htmlFor="key" className="flex items-center gap-2 cursor-pointer">
-                  <Key className="h-4 w-4" />
-                  SSH-Key
-                </Label>
-              </div>
+              {osType === "linux" && (
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="key" id="key" />
+                  <Label htmlFor="key" className="flex items-center gap-2 cursor-pointer">
+                    <Key className="h-4 w-4" />
+                    SSH-Key
+                  </Label>
+                </div>
+              )}
             </RadioGroup>
           </div>
 
@@ -154,7 +221,7 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
               id="gamePath"
               value={gamePath}
               onChange={(e) => setGamePath(e.target.value)}
-              placeholder="/home/gameserver"
+              placeholder={osType === "windows" ? "C:\\GameServers" : "/home/gameserver"}
               required
             />
             <p className="text-xs text-muted-foreground">

@@ -121,6 +121,7 @@ export type Database = {
           id: string
           last_check: string | null
           name: string
+          os_type: string | null
           port: number | null
           status: string | null
           updated_at: string
@@ -135,6 +136,7 @@ export type Database = {
           id?: string
           last_check?: string | null
           name: string
+          os_type?: string | null
           port?: number | null
           status?: string | null
           updated_at?: string
@@ -149,6 +151,7 @@ export type Database = {
           id?: string
           last_check?: string | null
           name?: string
+          os_type?: string | null
           port?: number | null
           status?: string | null
           updated_at?: string
