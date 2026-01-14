@@ -40,17 +40,23 @@ serve(async (req) => {
 
     const token = authHeader.replace('Bearer ', '');
 
-    // Create client and verify the JWT token
-    const supabaseUser = createClient(supabaseUrl, supabaseAnonKey);
-    const { data: { user }, error: authError } = await supabaseUser.auth.getUser(token);
+    // Create client with auth header for JWT validation
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } }
+    });
 
-    if (authError || !user) {
-      console.error('Auth error:', authError);
+    // Verify JWT using getClaims
+    const { data: claimsData, error: claimsError } = await supabase.auth.getClaims(token);
+    
+    if (claimsError || !claimsData?.claims) {
+      console.error('Auth error:', claimsError);
       return new Response(
         JSON.stringify({ error: 'Nicht autorisiert' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    const userId = claimsData.claims.sub as string;
 
     // Create admin client for database operations
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
@@ -81,9 +87,9 @@ serve(async (req) => {
 
     // Check if user owns this node or is admin
     const { data: isAdmin } = await supabaseAdmin
-      .rpc('has_role', { _user_id: user.id, _role: 'admin' });
+      .rpc('has_role', { _user_id: userId, _role: 'admin' });
 
-    if (node.user_id !== user.id && !isAdmin) {
+    if (node.user_id !== userId && !isAdmin) {
       return new Response(
         JSON.stringify({ error: 'Keine Berechtigung' }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
