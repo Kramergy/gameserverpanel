@@ -3,6 +3,7 @@ import { useServerNodes, ServerNode } from "@/hooks/useServerNodes";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AddNodeDialog } from "./AddNodeDialog";
+import { NodeCommandDialog } from "./NodeCommandDialog";
 import { 
   Server, 
   Plus, 
@@ -16,7 +17,8 @@ import {
   RefreshCw,
   CheckCircle2,
   XCircle,
-  AlertCircle
+  AlertCircle,
+  Terminal
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -66,6 +68,7 @@ export function ServerNodesSettings() {
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [testResultDialogOpen, setTestResultDialogOpen] = useState(false);
   const [testedNodeName, setTestedNodeName] = useState("");
+  const [commandNode, setCommandNode] = useState<ServerNode | null>(null);
 
   const handleEdit = (node: ServerNode) => {
     setEditNode(node);
@@ -228,6 +231,15 @@ export function ServerNodesSettings() {
                         <Button
                           variant="outline"
                           size="icon"
+                          onClick={() => setCommandNode(node)}
+                          title="Befehle senden"
+                          disabled={node.os_type !== 'windows'}
+                        >
+                          <Terminal className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="icon"
                           onClick={() => handleTestConnection(node)}
                           disabled={testingNodeId === node.id}
                           title="Verbindung testen"
@@ -266,6 +278,12 @@ export function ServerNodesSettings() {
         open={addDialogOpen} 
         onOpenChange={handleCloseDialog}
         editNode={editNode}
+      />
+
+      <NodeCommandDialog
+        open={!!commandNode}
+        onOpenChange={() => setCommandNode(null)}
+        node={commandNode}
       />
 
       <AlertDialog open={!!deleteNodeId} onOpenChange={() => setDeleteNodeId(null)}>

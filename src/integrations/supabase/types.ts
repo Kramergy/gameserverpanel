@@ -14,6 +14,50 @@ export type Database = {
   }
   public: {
     Tables: {
+      node_commands: {
+        Row: {
+          command_data: Json | null
+          command_type: string
+          created_at: string
+          executed_at: string | null
+          id: string
+          node_id: string
+          result: Json | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          command_data?: Json | null
+          command_type: string
+          created_at?: string
+          executed_at?: string | null
+          id?: string
+          node_id: string
+          result?: Json | null
+          status?: string
+          user_id: string
+        }
+        Update: {
+          command_data?: Json | null
+          command_type?: string
+          created_at?: string
+          executed_at?: string | null
+          id?: string
+          node_id?: string
+          result?: Json | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "node_commands_node_id_fkey"
+            columns: ["node_id"]
+            isOneToOne: false
+            referencedRelation: "server_nodes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
