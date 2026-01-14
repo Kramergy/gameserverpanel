@@ -7,6 +7,7 @@ import { useEffect } from "react";
 export interface ServerInstance {
   id: string;
   user_id: string;
+  node_id: string | null;
   name: string;
   game: string;
   game_icon: string;
@@ -18,8 +19,16 @@ export interface ServerInstance {
   ram_allocated: number;
   cpu_usage: number;
   ram_usage: number;
+  install_path: string | null;
   created_at: string;
   updated_at: string;
+  // Joined node data
+  node?: {
+    id: string;
+    name: string;
+    host: string;
+    status: string;
+  } | null;
 }
 
 export interface CreateServerInput {
@@ -29,6 +38,7 @@ export interface CreateServerInput {
   port: number;
   max_players: number;
   ram_allocated: number;
+  node_id: string;
 }
 
 export function useServerInstances() {
@@ -42,7 +52,15 @@ export function useServerInstances() {
       
       const { data, error } = await supabase
         .from("server_instances")
-        .select("*")
+        .select(`
+          *,
+          node:server_nodes (
+            id,
+            name,
+            host,
+            status
+          )
+        `)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -83,6 +101,7 @@ export function useServerInstances() {
         .from("server_instances")
         .insert({
           user_id: user.id,
+          node_id: input.node_id,
           name: input.name,
           game: input.game,
           game_icon: input.game_icon,
