@@ -720,25 +720,27 @@ Write-Host ""
 function generateLinuxInstallScript(nodeName: string, gamePath: string, apiUrl: string, agentToken: string): string {
   // The agent script content - will be written to file via heredoc
   // Using 'AGENTEOF' (quoted) means NO variable substitution, so we use literal $
+  // We embed the config values directly instead of using arguments
   const agentScript = `#!/bin/bash
 
-API_URL="$1"
-AGENT_TOKEN="$2"
-GAME_PATH="$3"
+# Configuration - embedded during installation
+API_URL="${apiUrl}"
+AGENT_TOKEN="${agentToken}"
+GAME_PATH="${gamePath}"
 LOG_FILE="/var/log/gameserver-agent.log"
 
 log() {
-    echo "[\$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+    echo "[\$(date '+%Y-%m-%d %H:%M:%S')] \$1" | tee -a "\$LOG_FILE"
 }
 
 send_result() {
-    local cmd_id="$1"
-    local success="$2"
-    local result="$3"
+    local cmd_id="\$1"
+    local success="\$2"
+    local result="\$3"
     
-    curl -s -X POST "$API_URL/command-result" \\
+    curl -s -X POST "\$API_URL/command-result" \\
         -H "Content-Type: application/json" \\
-        -H "x-agent-token: $AGENT_TOKEN" \\
+        -H "x-agent-token: \$AGENT_TOKEN" \\
         -d "{\\"commandId\\":\\"$cmd_id\\",\\"success\\":$success,\\"result\\":$result}" \\
         --max-time 30 || log "Failed to send result for $cmd_id"
 }
@@ -1010,7 +1012,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/opt/gameserver-agent/agent.sh "${apiUrl}" "${agentToken}" "${gamePath}"
+ExecStart=/opt/gameserver-agent/agent.sh
 Restart=always
 RestartSec=5
 User=root
