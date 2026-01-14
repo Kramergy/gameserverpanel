@@ -929,6 +929,9 @@ STARTSCRIPT
             fi
             ;;
         *)
+            log "Unknown command: $cmd_type"
+            result="{\\"success\\":false,\\"error\\":\\"Unknown command: $cmd_type\\"}"
+            ;;
     esac
     
     send_result "$cmd_id" "$success" "$result"
