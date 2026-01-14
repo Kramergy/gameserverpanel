@@ -32,6 +32,14 @@ serve(async (req) => {
     return handleHeartbeat(req);
   }
 
+  if (path.endsWith('/send-log')) {
+    return handleSendLog(req);
+  }
+
+  if (path.endsWith('/stream-logs')) {
+    return handleStreamLogs(req);
+  }
+
   if (req.method === 'POST') {
     return handleAgentRegistration(req);
   }
@@ -259,6 +267,182 @@ async function handleHeartbeat(req: Request): Promise<Response> {
     console.error('Error in heartbeat:', error);
     return new Response(
       JSON.stringify({ error: 'Internal server error' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+}
+
+// Agent sends log entries
+async function handleSendLog(req: Request): Promise<Response> {
+  try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    const agentToken = req.headers.get('x-agent-token');
+    if (!agentToken) {
+      return new Response(
+        JSON.stringify({ error: 'Agent token required' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Verify agent token and get node
+    const { data: node, error: nodeError } = await supabase
+      .from('server_nodes')
+      .select('id, user_id')
+      .eq('agent_token', agentToken)
+      .single();
+
+    if (nodeError || !node) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid agent token' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const body = await req.json();
+    const { serverId, logs } = body;
+
+    if (!serverId || !logs || !Array.isArray(logs)) {
+      return new Response(
+        JSON.stringify({ error: 'serverId and logs array required' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Insert logs
+    const logsToInsert = logs.map((log: { type?: string; message: string }) => ({
+      server_id: serverId,
+      user_id: node.user_id,
+      log_type: log.type || 'info',
+      message: log.message
+    }));
+
+    const { error: insertError } = await supabase
+      .from('server_logs')
+      .insert(logsToInsert);
+
+    if (insertError) {
+      console.error('Error inserting logs:', insertError);
+      return new Response(
+        JSON.stringify({ error: 'Failed to insert logs' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    return new Response(
+      JSON.stringify({ success: true, count: logs.length }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+
+  } catch (error) {
+    console.error('Error in send-log:', error);
+    return new Response(
+      JSON.stringify({ error: 'Internal server error' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+}
+
+// Frontend fetches logs for a server (with optional streaming via realtime)
+async function handleStreamLogs(req: Request): Promise<Response> {
+  try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader?.startsWith('Bearer ')) {
+      return new Response(
+        JSON.stringify({ error: 'Nicht autorisiert' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } }
+    });
+
+    const { data: claimsData, error: claimsError } = await supabase.auth.getClaims(token);
+    if (claimsError || !claimsData?.claims) {
+      return new Response(
+        JSON.stringify({ error: 'Nicht autorisiert' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const userId = claimsData.claims.sub as string;
+    const url = new URL(req.url);
+    const serverId = url.searchParams.get('serverId');
+    const limit = parseInt(url.searchParams.get('limit') || '100');
+    const after = url.searchParams.get('after'); // For pagination
+
+    if (!serverId) {
+      return new Response(
+        JSON.stringify({ error: 'serverId required' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Verify user owns this server
+    const { data: server, error: serverError } = await supabaseAdmin
+      .from('server_instances')
+      .select('user_id')
+      .eq('id', serverId)
+      .single();
+
+    if (serverError || !server) {
+      return new Response(
+        JSON.stringify({ error: 'Server nicht gefunden' }),
+        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const { data: isAdmin } = await supabaseAdmin
+      .rpc('has_role', { _user_id: userId, _role: 'admin' });
+
+    if (server.user_id !== userId && !isAdmin) {
+      return new Response(
+        JSON.stringify({ error: 'Keine Berechtigung' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Fetch logs
+    let query = supabaseAdmin
+      .from('server_logs')
+      .select('*')
+      .eq('server_id', serverId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (after) {
+      query = query.gt('created_at', after);
+    }
+
+    const { data: logs, error: logsError } = await query;
+
+    if (logsError) {
+      console.error('Error fetching logs:', logsError);
+      return new Response(
+        JSON.stringify({ error: 'Fehler beim Laden der Logs' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    return new Response(
+      JSON.stringify({ success: true, logs: logs?.reverse() || [] }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+
+  } catch (error) {
+    console.error('Error in stream-logs:', error);
+    return new Response(
+      JSON.stringify({ error: 'Interner Serverfehler' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
@@ -517,6 +701,22 @@ function Send-Result {
     }
 }
 
+function Send-ServerLog {
+    param($ServerId, $Message, $LogType)
+    try {
+        $body = @{
+            serverId = $ServerId
+            logs = @(@{ message = $Message; type = $LogType })
+        } | ConvertTo-Json -Depth 5
+        
+        Invoke-RestMethod -Uri "$ApiUrl/send-log" -Method POST -Body $body -ContentType "application/json" -Headers @{"x-agent-token" = $AgentToken} -TimeoutSec 10
+    } catch {
+        # Silent fail for log sending
+    }
+}
+
+$script:LogWatchers = @{}
+
 function Execute-Command {
     param($Command)
     
@@ -632,14 +832,55 @@ function Execute-Command {
             }
             "start_gameserver" {
                 $installPath = $commandData.installPath
+                $serverId = $commandData.serverId
                 $startScript = Join-Path $installPath "start_server.bat"
+                $logFile = Join-Path $installPath "server.log"
                 
                 if (Test-Path $startScript) {
-                    $proc = Start-Process -FilePath "cmd.exe" -ArgumentList ("/c " + [char]34 + $startScript + [char]34) -WorkingDirectory $installPath -PassThru
+                    Send-ServerLog -ServerId $serverId -Message "Server wird gestartet..." -LogType "info"
+                    
+                    # Start server with output redirection to log file
+                    $proc = Start-Process -FilePath "cmd.exe" -ArgumentList ("/c " + [char]34 + $startScript + [char]34 + " > " + [char]34 + $logFile + [char]34 + " 2>&1") -WorkingDirectory $installPath -PassThru -WindowStyle Hidden
+                    
+                    # Start log watcher job
+                    $watcherScript = {
+                        param($LogFile, $ServerId, $ApiUrl, $AgentToken)
+                        $lastPos = 0
+                        while ($true) {
+                            if (Test-Path $LogFile) {
+                                $content = Get-Content $LogFile -Tail 50 -ErrorAction SilentlyContinue
+                                if ($content) {
+                                    $newLines = $content | Select-Object -Skip $lastPos
+                                    if ($newLines) {
+                                        foreach ($line in $newLines) {
+                                            if ($line.Trim()) {
+                                                $logType = "info"
+                                                if ($line -match "error|exception|failed" -and $line -notmatch "info") { $logType = "error" }
+                                                elseif ($line -match "warn") { $logType = "warn" }
+                                                elseif ($line -match "done|started|success") { $logType = "success" }
+                                                
+                                                try {
+                                                    $body = @{ serverId = $ServerId; logs = @(@{ message = $line; type = $logType }) } | ConvertTo-Json -Depth 5
+                                                    Invoke-RestMethod -Uri "$ApiUrl/send-log" -Method POST -Body $body -ContentType "application/json" -Headers @{"x-agent-token" = $AgentToken} -TimeoutSec 10
+                                                } catch {}
+                                            }
+                                        }
+                                        $lastPos = $content.Count
+                                    }
+                                }
+                            }
+                            Start-Sleep -Seconds 2
+                        }
+                    }
+                    
+                    Start-Job -ScriptBlock $watcherScript -ArgumentList $logFile, $serverId, $ApiUrl, $AgentToken -Name "LogWatcher_$serverId" | Out-Null
+                    
                     $result.success = $true
-                    $result.output = @{ pid = $proc.Id; serverId = $commandData.serverId }
+                    $result.output = @{ pid = $proc.Id; serverId = $serverId }
+                    Send-ServerLog -ServerId $serverId -Message "Server gestartet (PID: $($proc.Id))" -LogType "success"
                 } else {
                     $result.error = "Start script not found: $startScript"
+                    Send-ServerLog -ServerId $serverId -Message "Fehler: Start-Script nicht gefunden" -LogType "error"
                 }
             }
             "stop_gameserver" {
@@ -731,6 +972,18 @@ LOG_FILE="/var/log/gameserver-agent.log"
 
 log() {
     echo "[\$(date '+%Y-%m-%d %H:%M:%S')] \$1" | tee -a "\$LOG_FILE"
+}
+
+send_server_log() {
+    local server_id="\$1"
+    local message="\$2"
+    local log_type="\$3"
+    
+    curl -s -X POST "\$API_URL/send-log" \\
+        -H "Content-Type: application/json" \\
+        -H "x-agent-token: \$AGENT_TOKEN" \\
+        -d "{\\"serverId\\":\\"\$server_id\\",\\"logs\\":[{\\"message\\":\\"\$message\\",\\"type\\":\\"\$log_type\\"}]}" \\
+        --max-time 10 2>/dev/null || true
 }
 
 send_result() {
@@ -883,14 +1136,37 @@ STARTSCRIPT
         "start_gameserver")
             local install_path=\$(echo "$cmd_data" | jq -r '.installPath')
             local server_id=\$(echo "$cmd_data" | jq -r '.serverId')
+            local log_file="$install_path/server.log"
             
             if [ -f "$install_path/start_server.sh" ]; then
+                send_server_log "$server_id" "Server wird gestartet..." "info"
+                
                 cd "$install_path"
-                nohup ./start_server.sh > "$install_path/server.log" 2>&1 &
-                local pid=$!
+                nohup ./start_server.sh > "$log_file" 2>&1 &
+                local pid=\$!
+                
+                # Start log watcher in background
+                (
+                    tail -f "$log_file" 2>/dev/null | while read line; do
+                        if [ -n "\$line" ]; then
+                            log_type="info"
+                            if echo "\$line" | grep -qiE "error|exception|failed"; then
+                                log_type="error"
+                            elif echo "\$line" | grep -qi "warn"; then
+                                log_type="warn"
+                            elif echo "\$line" | grep -qiE "done|started|success|ready"; then
+                                log_type="success"
+                            fi
+                            send_server_log "$server_id" "\$line" "\$log_type"
+                        fi
+                    done
+                ) &
+                
+                send_server_log "$server_id" "Server gestartet (PID: \$pid)" "success"
                 success="true"
-                result="{\\"success\\":true,\\"output\\":{\\"pid\\":$pid,\\"serverId\\":\\"$server_id\\"}}"
+                result="{\\"success\\":true,\\"output\\":{\\"pid\\":\$pid,\\"serverId\\":\\"$server_id\\"}}"
             else
+                send_server_log "$server_id" "Fehler: Start-Script nicht gefunden" "error"
                 result="{\\"success\\":false,\\"error\\":\\"Start script not found\\"}"
             fi
             ;;
