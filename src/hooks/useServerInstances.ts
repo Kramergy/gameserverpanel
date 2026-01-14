@@ -166,6 +166,29 @@ export function useServerInstances() {
 
   const deleteServer = useMutation({
     mutationFn: async (serverId: string) => {
+      // Find the server to get node_id and install_path
+      const server = servers.find(s => s.id === serverId);
+      
+      // If server has a node and install path, send delete command to agent
+      if (server?.node_id && server?.install_path) {
+        try {
+          await supabase.functions.invoke("node-agent/send-command", {
+            body: {
+              nodeId: server.node_id,
+              commandType: "delete_gameserver",
+              commandData: {
+                serverId,
+                installPath: server.install_path,
+              },
+            },
+          });
+        } catch (err) {
+          console.error("Error sending delete command to agent:", err);
+          // Continue with database deletion even if agent command fails
+        }
+      }
+
+      // Delete from database
       const { error } = await supabase
         .from("server_instances")
         .delete()
