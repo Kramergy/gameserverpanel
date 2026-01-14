@@ -907,14 +907,19 @@ STARTSCRIPT
             
             log "Deleting gameserver at $install_path"
             
-            # Stop any running processes first
+            # Stop any running processes first (use full path to avoid killing agent)
             if [ -f "$install_path/server_info.json" ]; then
                 local executable=\$(jq -r '.executable // empty' "$install_path/server_info.json" 2>/dev/null)
                 if [ -n "$executable" ]; then
-                    local exe_name=\$(basename "$executable" | sed 's/\\.[^.]*$//')
-                    pkill -f "$exe_name" 2>/dev/null || true
+                    # Use full path pattern to avoid matching agent process
+                    pkill -f "$install_path.*$executable" 2>/dev/null || true
+                    # Also try to kill by the start script
+                    pkill -f "$install_path/start_server.sh" 2>/dev/null || true
                 fi
             fi
+            
+            # Small delay to ensure processes are stopped
+            sleep 1
             
             # Remove the directory
             if [ -d "$install_path" ]; then
