@@ -5,64 +5,7 @@ import { ConsoleView } from "./ConsoleView";
 import { ResourceChart } from "./ResourceChart";
 import { PlayersOnline } from "./PlayersOnline";
 
-const servers: ServerInstance[] = [
-  {
-    id: "1",
-    name: "Minecraft Survival",
-    game: "Minecraft 1.20.4",
-    gameIcon: "⛏️",
-    status: "online",
-    players: { current: 12, max: 20 },
-    cpu: 45,
-    ram: 62,
-    network: { up: 2.4, down: 5.1 },
-    uptime: "3d 14h 22m",
-    ip: "192.168.1.100",
-    port: 25565,
-  },
-  {
-    id: "2",
-    name: "ARK Survival",
-    game: "ARK: Survival Evolved",
-    gameIcon: "🦖",
-    status: "online",
-    players: { current: 8, max: 30 },
-    cpu: 78,
-    ram: 85,
-    network: { up: 4.2, down: 8.7 },
-    uptime: "1d 6h 45m",
-    ip: "192.168.1.100",
-    port: 27015,
-  },
-  {
-    id: "3",
-    name: "Rust Server",
-    game: "Rust",
-    gameIcon: "🔨",
-    status: "starting",
-    players: { current: 0, max: 50 },
-    cpu: 12,
-    ram: 28,
-    network: { up: 0, down: 0 },
-    uptime: "0m",
-    ip: "192.168.1.100",
-    port: 28015,
-  },
-  {
-    id: "4",
-    name: "Valheim World",
-    game: "Valheim",
-    gameIcon: "⚔️",
-    status: "offline",
-    players: { current: 0, max: 10 },
-    cpu: 0,
-    ram: 0,
-    network: { up: 0, down: 0 },
-    uptime: "-",
-    ip: "192.168.1.100",
-    port: 2456,
-  },
-];
+const servers: ServerInstance[] = [];
 
 interface DashboardProps {
   onServerSelect: (server: ServerInstance) => void;
@@ -114,15 +57,25 @@ export function Dashboard({ onServerSelect }: DashboardProps) {
       {/* Server Grid */}
       <div>
         <h2 className="text-xl font-semibold mb-4">Server Instanzen</h2>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {servers.map((server) => (
-            <ServerCard 
-              key={server.id} 
-              server={server} 
-              onSelect={onServerSelect}
-            />
-          ))}
-        </div>
+        {servers.length === 0 ? (
+          <div className="text-center py-12 border border-dashed border-border rounded-lg">
+            <Server className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+            <h3 className="text-lg font-medium">Keine Server vorhanden</h3>
+            <p className="text-muted-foreground mt-1">
+              Erstelle deinen ersten Gameserver, um loszulegen.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {servers.map((server) => (
+              <ServerCard 
+                key={server.id} 
+                server={server} 
+                onSelect={onServerSelect}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Bottom Grid */}
