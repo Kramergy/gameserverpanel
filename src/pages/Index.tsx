@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Dashboard } from "@/components/dashboard/Dashboard";
+import { ConsoleView } from "@/components/dashboard/ConsoleView";
+import { PlayersOnline } from "@/components/dashboard/PlayersOnline";
 import { ServerInstance } from "@/components/dashboard/ServerCard";
 
 const Index = () => {
@@ -39,6 +41,7 @@ const Index = () => {
               )}
             </div>
             <p className="text-muted-foreground">Server-Konsole und Befehlszeile</p>
+            <ConsoleView />
           </div>
         )}
         
@@ -46,6 +49,7 @@ const Index = () => {
           <div className="space-y-6">
             <h1 className="text-3xl font-bold">Spieler</h1>
             <p className="text-muted-foreground">Verwalte Spieler und Berechtigungen</p>
+            <PlayersOnline />
           </div>
         )}
         
