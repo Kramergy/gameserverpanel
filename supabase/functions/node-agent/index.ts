@@ -811,6 +811,26 @@ execute_command() {
                     fi
                     ;;
                 "java")
+                    log "Checking Java installation..."
+                    if ! command -v java &> /dev/null; then
+                        log "Java not found, installing OpenJDK 21..."
+                        if command -v apt-get &> /dev/null; then
+                            sudo apt-get update -qq
+                            sudo apt-get install -y -qq openjdk-21-jre-headless || sudo apt-get install -y -qq openjdk-17-jre-headless
+                        elif command -v dnf &> /dev/null; then
+                            sudo dnf install -y -q java-21-openjdk-headless || sudo dnf install -y -q java-17-openjdk-headless
+                        elif command -v yum &> /dev/null; then
+                            sudo yum install -y -q java-21-openjdk-headless || sudo yum install -y -q java-17-openjdk-headless
+                        elif command -v pacman &> /dev/null; then
+                            sudo pacman -S --noconfirm jre-openjdk-headless
+                        else
+                            log "WARNING: Could not install Java automatically. Please install manually."
+                        fi
+                        log "Java installation complete: \$(java -version 2>&1 | head -1)"
+                    else
+                        log "Java already installed: \$(java -version 2>&1 | head -1)"
+                    fi
+                    
                     log "Downloading Java server..."
                     wget -q -O "$install_path/server.jar" "$download_url"
                     echo "eula=true" > "$install_path/eula.txt"
