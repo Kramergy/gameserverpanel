@@ -834,14 +834,23 @@ SRVINFO
             
             local final_args=\$(echo "$start_args" | sed "s/{PORT}/$port/g" | sed "s/{MAXPLAYERS}/$max_players/g" | sed "s/{NAME}/$server_name/g" | sed "s/{RAM}/$ram/g")
             
-            cat > "$install_path/start_server.sh" << STARTSCRIPT
+            # Generate start script based on install type
+            if [ "$install_type" = "java" ]; then
+                cat > "$install_path/start_server.sh" << STARTSCRIPT
+#!/bin/bash
+cd "$install_path"
+java $final_args
+STARTSCRIPT
+            else
+                cat > "$install_path/start_server.sh" << STARTSCRIPT
 #!/bin/bash
 cd "$install_path"
 ./$executable $final_args
 STARTSCRIPT
+            fi
             chmod +x "$install_path/start_server.sh"
             
-            if [ -f "$install_path/$executable" ]; then
+            if [ -f "$install_path/$executable" ] && [ "$install_type" != "java" ]; then
                 chmod +x "$install_path/$executable"
             fi
             
