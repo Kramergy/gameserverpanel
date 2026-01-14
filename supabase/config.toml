@@ -1,1 +1,4 @@
 project_id = "ouvgvyxkclzfpaucjydm"
+
+[functions.test-node-connection]
+verify_jwt = false
