@@ -156,6 +156,41 @@ export type Database = {
           },
         ]
       }
+      server_logs: {
+        Row: {
+          created_at: string
+          id: string
+          log_type: string
+          message: string
+          server_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          log_type?: string
+          message: string
+          server_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          log_type?: string
+          message?: string
+          server_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "server_logs_server_id_fkey"
+            columns: ["server_id"]
+            isOneToOne: false
+            referencedRelation: "server_instances"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       server_nodes: {
         Row: {
           agent_connected_at: string | null
