@@ -384,13 +384,20 @@ async function handleAgentRegistration(req: Request): Promise<Response> {
     // Generate PowerShell install script
     const wsUrl = `wss://${supabaseUrl.replace('https://', '')}/functions/v1/node-agent?token=${agentToken}`;
     
-    const installScript = generateInstallScript(node.name, node.game_path, wsUrl);
+    // Generate both Windows and Linux scripts
+    const windowsScript = generateWindowsInstallScript(node.name, node.game_path, wsUrl);
+    const linuxScript = generateLinuxInstallScript(node.name, node.game_path, wsUrl);
+    
+    // Return appropriate script based on OS type
+    const installScript = node.os_type === 'linux' ? linuxScript : windowsScript;
 
     return new Response(
       JSON.stringify({ 
         success: true,
         agentToken,
         installScript,
+        linuxScript,
+        windowsScript,
         wsUrl
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -405,9 +412,9 @@ async function handleAgentRegistration(req: Request): Promise<Response> {
   }
 }
 
-function generateInstallScript(nodeName: string, gamePath: string, wsUrl: string): string {
+function generateWindowsInstallScript(nodeName: string, gamePath: string, wsUrl: string): string {
   return `
-# GameServer Panel Agent - Installation Script
+# GameServer Panel Agent - Installation Script (Windows)
 # Node: ${nodeName}
 
 $AgentPath = "$env:ProgramData\\GameServerAgent"
@@ -808,5 +815,360 @@ Write-Host "  - Verzeichnisse auflisten"
 Write-Host "  - Prozesse starten/stoppen"
 Write-Host "  - Scripts ausfuehren"
 Write-Host ""
+`;
+}
+
+function generateLinuxInstallScript(nodeName: string, gamePath: string, wsUrl: string): string {
+  return `#!/bin/bash
+# GameServer Panel Agent - Installation Script (Linux)
+# Node: ${nodeName}
+
+set -e
+
+AGENT_PATH="/opt/gameserver-agent"
+GAME_PATH="${gamePath}"
+WS_URL="${wsUrl}"
+
+echo -e "\\e[36mInstalling GameServer Agent...\\e[0m"
+
+# Check if running as root
+if [ "\\$EUID" -ne 0 ]; then
+    echo -e "\\e[31mBitte als root ausfuehren: sudo bash install.sh\\e[0m"
+    exit 1
+fi
+
+# Create directories
+mkdir -p "\\$AGENT_PATH"
+mkdir -p "\\$GAME_PATH"
+
+# Install dependencies
+echo "Installing dependencies..."
+if command -v apt-get &> /dev/null; then
+    apt-get update -qq
+    apt-get install -y -qq curl wget jq unzip lib32gcc-s1 2>/dev/null || apt-get install -y -qq curl wget jq unzip lib32gcc1 2>/dev/null || true
+elif command -v yum &> /dev/null; then
+    yum install -y curl wget jq unzip glibc.i686 libstdc++.i686 2>/dev/null || true
+elif command -v dnf &> /dev/null; then
+    dnf install -y curl wget jq unzip glibc.i686 libstdc++.i686 2>/dev/null || true
+fi
+
+# Install websocat
+if ! command -v websocat &> /dev/null; then
+    echo "Installing websocat..."
+    curl -sSL https://github.com/vi/websocat/releases/download/v1.13.0/websocat.x86_64-unknown-linux-musl -o /usr/local/bin/websocat
+    chmod +x /usr/local/bin/websocat
+fi
+
+# Create the agent script
+cat > "\\$AGENT_PATH/agent.sh" << 'AGENTEOF'
+#!/bin/bash
+
+GAME_PATH="\\$1"
+WS_URL="\\$2"
+LOG_FILE="/var/log/gameserver-agent.log"
+
+log() {
+    echo "[\\$(date '+%Y-%m-%d %H:%M:%S')] \\$1" | tee -a "\\$LOG_FILE"
+}
+
+execute_command() {
+    local cmd_type="\\$1"
+    local cmd_data="\\$2"
+    local cmd_id="\\$3"
+    
+    local success="false"
+    local error=""
+    local output=""
+    
+    case "\\$cmd_type" in
+        "ping")
+            success="true"
+            output="pong"
+            ;;
+        "get_system_info")
+            local cpu=\\$(top -bn1 | grep "Cpu(s)" | awk '{print \\$2}' | cut -d'%' -f1 2>/dev/null || echo "0")
+            local mem_total=\\$(free -g 2>/dev/null | awk '/^Mem:/{print \\$2}' || echo "0")
+            local mem_used=\\$(free -g 2>/dev/null | awk '/^Mem:/{print \\$3}' || echo "0")
+            success="true"
+            output="{\\"cpu_percent\\": \\$cpu, \\"memory_used_gb\\": \\$mem_used, \\"memory_total_gb\\": \\$mem_total, \\"hostname\\": \\"\\$(hostname)\\"}"
+            ;;
+        "check_path")
+            local path_check=\\$(echo "\\$cmd_data" | jq -r '.path // "'"\\$GAME_PATH"'"')
+            if [ -e "\\$path_check" ]; then
+                if [ -d "\\$path_check" ]; then
+                    output='{"exists": true, "is_directory": true}'
+                else
+                    output='{"exists": true, "is_directory": false}'
+                fi
+            else
+                output='{"exists": false, "is_directory": false}'
+            fi
+            success="true"
+            ;;
+        "list_directory")
+            local target_path=\\$(echo "\\$cmd_data" | jq -r '.path // "'"\\$GAME_PATH"'"')
+            if [ -d "\\$target_path" ]; then
+                output=\\$(ls -la "\\$target_path" 2>&1 | jq -Rs '.')
+                success="true"
+            else
+                error="Path not found: \\$target_path"
+            fi
+            ;;
+        "run_script")
+            local script=\\$(echo "\\$cmd_data" | jq -r '.script')
+            if [ -n "\\$script" ]; then
+                output=\\$(bash -c "\\$script" 2>&1 | jq -Rs '.')
+                success="true"
+            else
+                error="No script provided"
+            fi
+            ;;
+        "install_gameserver")
+            local game_id=\\$(echo "\\$cmd_data" | jq -r '.gameId')
+            local server_name=\\$(echo "\\$cmd_data" | jq -r '.serverName')
+            local server_id=\\$(echo "\\$cmd_data" | jq -r '.serverId')
+            local install_path="\\$GAME_PATH/\\$game_id-\\$server_id"
+            local install_type=\\$(echo "\\$cmd_data" | jq -r '.installType')
+            local steam_app_id=\\$(echo "\\$cmd_data" | jq -r '.steamAppId // empty')
+            local download_url=\\$(echo "\\$cmd_data" | jq -r '.downloadUrl // empty')
+            local executable=\\$(echo "\\$cmd_data" | jq -r '.executable')
+            local port=\\$(echo "\\$cmd_data" | jq -r '.port')
+            local max_players=\\$(echo "\\$cmd_data" | jq -r '.maxPlayers')
+            local ram=\\$(echo "\\$cmd_data" | jq -r '.ram')
+            local start_args=\\$(echo "\\$cmd_data" | jq -r '.startArgs // empty')
+            
+            log "Installing \\$game_id to \\$install_path"
+            
+            # Send progress via stdout (will be piped to websocket)
+            send_progress() {
+                echo '{"type":"install_progress","serverId":"'\\$server_id'","stage":"'\\$1'","percent":'\\$2',"message":"'\\$3'"}'
+            }
+            
+            send_progress "init" 5 "Installation wird vorbereitet..."
+            
+            # Create install directory
+            mkdir -p "\\$install_path"
+            
+            case "\\$install_type" in
+                "steamcmd")
+                    STEAMCMD_PATH="\\$GAME_PATH/steamcmd"
+                    
+                    # Install SteamCMD if not exists
+                    if [ ! -f "\\$STEAMCMD_PATH/steamcmd.sh" ]; then
+                        send_progress "steamcmd" 10 "SteamCMD wird installiert..."
+                        mkdir -p "\\$STEAMCMD_PATH"
+                        cd "\\$STEAMCMD_PATH"
+                        curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar zxvf -
+                    fi
+                    
+                    send_progress "download" 20 "Gameserver wird heruntergeladen (Steam App \\$steam_app_id)..."
+                    
+                    # Run SteamCMD
+                    "\\$STEAMCMD_PATH/steamcmd.sh" +force_install_dir "\\$install_path" +login anonymous +app_update "\\$steam_app_id" validate +quit || true
+                    
+                    send_progress "config" 80 "Server wird konfiguriert..."
+                    ;;
+                "direct")
+                    send_progress "download" 20 "Server-Dateien werden heruntergeladen..."
+                    
+                    local filename=\\$(basename "\\$download_url")
+                    wget -q -O "\\$install_path/\\$filename" "\\$download_url"
+                    
+                    # Extract if zip
+                    if [[ "\\$filename" == *.zip ]]; then
+                        send_progress "extract" 50 "Dateien werden entpackt..."
+                        unzip -q -o "\\$install_path/\\$filename" -d "\\$install_path"
+                        rm "\\$install_path/\\$filename"
+                    fi
+                    
+                    send_progress "config" 80 "Server wird konfiguriert..."
+                    ;;
+                "java")
+                    send_progress "download" 20 "Server JAR wird heruntergeladen..."
+                    
+                    # Check for Java
+                    if ! command -v java &> /dev/null; then
+                        send_progress "java" 25 "Java wird installiert..."
+                        if command -v apt-get &> /dev/null; then
+                            apt-get install -y openjdk-21-jre-headless 2>/dev/null || apt-get install -y openjdk-17-jre-headless 2>/dev/null || apt-get install -y default-jre 2>/dev/null || true
+                        elif command -v yum &> /dev/null; then
+                            yum install -y java-21-openjdk 2>/dev/null || yum install -y java-17-openjdk 2>/dev/null || true
+                        fi
+                    fi
+                    
+                    # Download server.jar
+                    wget -q -O "\\$install_path/server.jar" "\\$download_url"
+                    
+                    # Create eula.txt
+                    echo "eula=true" > "\\$install_path/eula.txt"
+                    
+                    send_progress "config" 80 "Server wird konfiguriert..."
+                    ;;
+            esac
+            
+            # Create server_info.json
+            cat > "\\$install_path/server_info.json" << SRVINFO
+{
+    "gameId": "\\$game_id",
+    "serverName": "\\$server_name",
+    "serverId": "\\$server_id",
+    "port": \\$port,
+    "maxPlayers": \\$max_players,
+    "ram": \\$ram,
+    "executable": "\\$executable",
+    "startArgs": "\\$start_args",
+    "installPath": "\\$install_path",
+    "installedAt": "\\$(date -Iseconds)"
+}
+SRVINFO
+            
+            # Create start script
+            local final_args=\\$(echo "\\$start_args" | sed "s/{PORT}/\\$port/g" | sed "s/{MAXPLAYERS}/\\$max_players/g" | sed "s/{NAME}/\\$server_name/g" | sed "s/{RAM}/\\$ram/g")
+            
+            cat > "\\$install_path/start_server.sh" << STARTSCRIPT
+#!/bin/bash
+cd "\\$install_path"
+./\\$executable \\$final_args
+STARTSCRIPT
+            chmod +x "\\$install_path/start_server.sh"
+            
+            # Make executable runnable
+            if [ -f "\\$install_path/\\$executable" ]; then
+                chmod +x "\\$install_path/\\$executable"
+            fi
+            
+            send_progress "complete" 100 "Installation abgeschlossen!"
+            
+            success="true"
+            output='{"installPath":"'\\$install_path'","executable":"'\\$executable'","startScript":"'\\$install_path'/start_server.sh"}'
+            ;;
+        "start_gameserver")
+            local server_id=\\$(echo "\\$cmd_data" | jq -r '.serverId')
+            local install_path=\\$(echo "\\$cmd_data" | jq -r '.installPath')
+            
+            if [ -f "\\$install_path/start_server.sh" ]; then
+                cd "\\$install_path"
+                nohup ./start_server.sh > "\\$install_path/server.log" 2>&1 &
+                local pid=\\$!
+                success="true"
+                output='{"pid":'\\$pid',"serverId":"'\\$server_id'"}'
+            else
+                error="Start script not found: \\$install_path/start_server.sh"
+            fi
+            ;;
+        "stop_gameserver")
+            local executable=\\$(echo "\\$cmd_data" | jq -r '.executable')
+            local exe_name=\\$(basename "\\$executable" | sed 's/\\\\.[^.]*\\$//')
+            pkill -f "\\$exe_name" 2>/dev/null || true
+            success="true"
+            output='"Game server stopped"'
+            ;;
+        *)
+            error="Unknown command: \\$cmd_type"
+            ;;
+    esac
+    
+    # Return result
+    if [ "\\$success" = "true" ]; then
+        echo '{"type":"command_result","commandId":"'\\$cmd_id'","success":true,"result":{"success":true,"output":'\\$output'}}'
+    else
+        echo '{"type":"command_result","commandId":"'\\$cmd_id'","success":false,"result":{"success":false,"error":"'\\$error'"}}'
+    fi
+}
+
+# Main loop
+main() {
+    log "Starting GameServer Agent..."
+    
+    while true; do
+        log "Connecting to GameServer Panel..."
+        
+        # Get system info
+        local_ip=\\$(hostname -I 2>/dev/null | awk '{print \\$1}' || echo "")
+        public_ip=\\$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null || echo "")
+        hostname_val=\\$(hostname)
+        
+        # Create a temp file for bidirectional communication
+        FIFO_IN="/tmp/agent_in_\\$\\$"
+        FIFO_OUT="/tmp/agent_out_\\$\\$"
+        mkfifo "\\$FIFO_IN" "\\$FIFO_OUT" 2>/dev/null || true
+        
+        # Connect via websocat
+        (
+            # Send system info first
+            echo '{"type":"system_info","data":{"hostname":"'\\$hostname_val'","local_ip":"'\\$local_ip'","public_ip":"'\\$public_ip'","os":"Linux","game_path":"'"\\$GAME_PATH"'"}}'
+            
+            # Heartbeat sender
+            while true; do
+                sleep 30
+                echo '{"type":"heartbeat"}'
+            done &
+            HEARTBEAT_PID=\\$!
+            
+            # Read commands from websocket and execute
+            cat "\\$FIFO_OUT"
+            
+            kill \\$HEARTBEAT_PID 2>/dev/null
+        ) | websocat -t "\\$WS_URL" 2>&1 | while read -r line; do
+            log "Received: \\$line"
+            if echo "\\$line" | jq -e '.type == "execute_command"' > /dev/null 2>&1; then
+                cmd_type=\\$(echo "\\$line" | jq -r '.commandType')
+                cmd_data=\\$(echo "\\$line" | jq -c '.data')
+                cmd_id=\\$(echo "\\$line" | jq -r '.commandId')
+                
+                log "Executing command: \\$cmd_type (ID: \\$cmd_id)"
+                result=\\$(execute_command "\\$cmd_type" "\\$cmd_data" "\\$cmd_id")
+                log "Result: \\$result"
+                echo "\\$result"
+            fi
+        done | websocat -t "\\$WS_URL" 2>/dev/null &
+        
+        # Wait a bit then check if still running
+        sleep 60
+        
+        log "Connection lost. Reconnecting in 5 seconds..."
+        sleep 5
+    done
+}
+
+main "\\$@"
+AGENTEOF
+
+chmod +x "\\$AGENT_PATH/agent.sh"
+
+# Create systemd service
+cat > /etc/systemd/system/gameserver-agent.service << EOF
+[Unit]
+Description=GameServer Panel Agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=\\$AGENT_PATH/agent.sh "\\$GAME_PATH" "\\$WS_URL"
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable and start service
+systemctl daemon-reload
+systemctl enable gameserver-agent
+systemctl start gameserver-agent
+
+echo ""
+echo -e "\\e[32m========================================\\e[0m"
+echo -e "\\e[32m GameServer Agent erfolgreich installiert!\\e[0m"
+echo -e "\\e[32m========================================\\e[0m"
+echo ""
+echo "Der Agent verbindet sich jetzt automatisch mit dem Panel."
+echo "Game-Installationspfad: \\$GAME_PATH"
+echo ""
+echo "Status pruefen: systemctl status gameserver-agent"
+echo "Logs anzeigen: journalctl -u gameserver-agent -f"
+echo ""
 `;
 }
