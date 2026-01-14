@@ -44,6 +44,60 @@ export type Database = {
         }
         Relationships: []
       }
+      server_instances: {
+        Row: {
+          cpu_usage: number | null
+          created_at: string
+          current_players: number | null
+          game: string
+          game_icon: string
+          id: string
+          ip: string | null
+          max_players: number | null
+          name: string
+          port: number | null
+          ram_allocated: number | null
+          ram_usage: number | null
+          status: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          cpu_usage?: number | null
+          created_at?: string
+          current_players?: number | null
+          game: string
+          game_icon: string
+          id?: string
+          ip?: string | null
+          max_players?: number | null
+          name: string
+          port?: number | null
+          ram_allocated?: number | null
+          ram_usage?: number | null
+          status?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          cpu_usage?: number | null
+          created_at?: string
+          current_players?: number | null
+          game?: string
+          game_icon?: string
+          id?: string
+          ip?: string | null
+          max_players?: number | null
+          name?: string
+          port?: number | null
+          ram_allocated?: number | null
+          ram_usage?: number | null
+          status?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string

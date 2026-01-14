@@ -17,6 +17,7 @@ import { useAuth } from "@/hooks/useAuth";
 interface SidebarProps {
   activeTab: string;
   onTabChange: (tab: string) => void;
+  onNewInstance: () => void;
 }
 
 const navItems = [
@@ -28,7 +29,7 @@ const navItems = [
   { id: "settings", label: "Einstellungen", icon: Settings },
 ];
 
-export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
+export function Sidebar({ activeTab, onTabChange, onNewInstance }: SidebarProps) {
   const { profile, role, signOut, isAdmin } = useAuth();
 
   const displayName = profile?.username || profile?.email?.split("@")[0] || "Benutzer";
@@ -68,7 +69,10 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
 
       {/* Quick Actions */}
       <div className="p-4 border-t border-sidebar-border">
-        <button className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors font-medium">
+        <button 
+          onClick={onNewInstance}
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors font-medium"
+        >
           <Plus className="w-5 h-5" />
           <span>Neue Instanz</span>
         </button>

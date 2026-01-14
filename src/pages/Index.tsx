@@ -4,10 +4,12 @@ import { Dashboard } from "@/components/dashboard/Dashboard";
 import { ConsoleView } from "@/components/dashboard/ConsoleView";
 import { PlayersOnline } from "@/components/dashboard/PlayersOnline";
 import { ServerInstance } from "@/components/dashboard/ServerCard";
+import { CreateServerDialog } from "@/components/dashboard/CreateServerDialog";
 
 const Index = () => {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [selectedServer, setSelectedServer] = useState<ServerInstance | null>(null);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
   const handleServerSelect = (server: ServerInstance) => {
     setSelectedServer(server);
@@ -16,7 +18,8 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
+      <Sidebar activeTab={activeTab} onTabChange={setActiveTab} onNewInstance={() => setCreateDialogOpen(true)} />
+      <CreateServerDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
       
       <main className="ml-64 p-8">
         {activeTab === "dashboard" && (
