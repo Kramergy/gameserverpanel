@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Dashboard } from "@/components/dashboard/Dashboard";
 import { ConsoleView } from "@/components/dashboard/ConsoleView";
@@ -7,13 +8,13 @@ import { ServerInstance } from "@/components/dashboard/ServerCard";
 import { CreateServerDialog } from "@/components/dashboard/CreateServerDialog";
 
 const Index = () => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("dashboard");
   const [selectedServer, setSelectedServer] = useState<ServerInstance | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
   const handleServerSelect = (server: ServerInstance) => {
-    setSelectedServer(server);
-    setActiveTab("console");
+    navigate(`/server/${server.id}`);
   };
 
   return (
