@@ -948,8 +948,8 @@ AGENTEOF
 
 chmod +x "\\$AGENT_PATH/agent.sh"
 
-# Create systemd service
-cat > /etc/systemd/system/gameserver-agent.service << 'SERVICEEOF'
+# Create systemd service with actual values
+cat > /etc/systemd/system/gameserver-agent.service << SERVICEEOF
 [Unit]
 Description=GameServer Panel Agent
 After=network.target network-online.target
