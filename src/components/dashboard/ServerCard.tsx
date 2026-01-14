@@ -17,7 +17,7 @@ export interface ServerInstance {
   name: string;
   game: string;
   game_icon: string;
-  status: "online" | "offline" | "starting" | "installing";
+  status: "online" | "offline" | "starting" | "installing" | "installed" | "error";
   current_players: number;
   max_players: number;
   cpu_usage: number;
@@ -50,21 +50,26 @@ interface ServerCardProps {
 export function ServerCard({ server, onSelect, onStart, onStop, onRestart, onDelete }: ServerCardProps) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   
-  const statusClasses = {
+  const statusClasses: Record<string, string> = {
     online: "status-online",
     offline: "status-offline",
     starting: "status-starting",
     installing: "status-starting",
+    installed: "status-online",
+    error: "bg-destructive/10 text-destructive",
   };
 
-  const statusLabels = {
+  const statusLabels: Record<string, string> = {
     online: "Online",
     offline: "Offline",
     starting: "Startet...",
     installing: "Installiert...",
+    installed: "Bereit",
+    error: "Fehler",
   };
 
   const isLoading = server.status === "starting" || server.status === "installing";
+  const canStart = server.status === "offline" || server.status === "installed";
 
   const handleAction = (e: React.MouseEvent, action: () => void) => {
     e.stopPropagation();
@@ -197,7 +202,7 @@ export function ServerCard({ server, onSelect, onStart, onStop, onRestart, onDel
             ) : (
               <button 
                 onClick={(e) => handleAction(e, () => onStart(server.id))}
-                disabled={isLoading}
+                disabled={isLoading || server.status === "error"}
                 className="p-2 rounded-lg bg-success/10 text-success hover:bg-success/20 transition-colors disabled:opacity-50"
                 title="Starten"
               >
