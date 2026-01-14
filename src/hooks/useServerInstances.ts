@@ -11,7 +11,7 @@ export interface ServerInstance {
   name: string;
   game: string;
   game_icon: string;
-  status: "online" | "offline" | "starting" | "installing";
+  status: "online" | "offline" | "starting" | "installing" | "installed" | "error";
   ip: string;
   port: number;
   max_players: number;
@@ -144,7 +144,7 @@ export function useServerInstances() {
   });
 
   const updateServerStatus = useMutation({
-    mutationFn: async ({ serverId, status }: { serverId: string; status: "online" | "offline" | "starting" | "installing" }) => {
+    mutationFn: async ({ serverId, status }: { serverId: string; status: "online" | "offline" | "starting" | "installing" | "installed" | "error" }) => {
       const { error } = await supabase
         .from("server_instances")
         .update({ status })
