@@ -899,9 +899,34 @@ STARTSCRIPT
             success="true"
             result="{\\"success\\":true,\\"output\\":\\"Game server stopped\\"}"
             ;;
-        *)
-            result="{\\"success\\":false,\\"error\\":\\"Unknown command: $cmd_type\\"}"
+        "delete_gameserver")
+            local install_path=\$(echo "$cmd_data" | jq -r '.installPath')
+            local server_id=\$(echo "$cmd_data" | jq -r '.serverId')
+            
+            log "Deleting gameserver at $install_path"
+            
+            # Stop any running processes first
+            if [ -f "$install_path/server_info.json" ]; then
+                local executable=\$(jq -r '.executable // empty' "$install_path/server_info.json" 2>/dev/null)
+                if [ -n "$executable" ]; then
+                    local exe_name=\$(basename "$executable" | sed 's/\\.[^.]*$//')
+                    pkill -f "$exe_name" 2>/dev/null || true
+                fi
+            fi
+            
+            # Remove the directory
+            if [ -d "$install_path" ]; then
+                rm -rf "$install_path"
+                log "Deleted directory: $install_path"
+                success="true"
+                result="{\\"success\\":true,\\"output\\":{\\"deleted\\":\\"$install_path\\",\\"serverId\\":\\"$server_id\\"}}"
+            else
+                log "Directory not found: $install_path"
+                success="true"
+                result="{\\"success\\":true,\\"output\\":{\\"message\\":\\"Directory not found or already deleted\\",\\"serverId\\":\\"$server_id\\"}}"
+            fi
             ;;
+        *)
     esac
     
     send_result "$cmd_id" "$success" "$result"
