@@ -26,10 +26,10 @@ serve(async (req) => {
 
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-    // Get auth user
+    // Get auth header
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
       return new Response(
@@ -38,16 +38,25 @@ serve(async (req) => {
       );
     }
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser(
-      authHeader.replace('Bearer ', '')
-    );
+    // Create client with user's JWT to verify authentication
+    const supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: { Authorization: authHeader }
+      }
+    });
+
+    const { data: { user }, error: authError } = await supabaseUser.auth.getUser();
 
     if (authError || !user) {
+      console.error('Auth error:', authError);
       return new Response(
         JSON.stringify({ error: 'Nicht autorisiert' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    // Create admin client for database operations
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
     const { nodeId }: TestNodeRequest = await req.json();
 
@@ -59,13 +68,14 @@ serve(async (req) => {
     }
 
     // Fetch the node
-    const { data: node, error: nodeError } = await supabase
+    const { data: node, error: nodeError } = await supabaseAdmin
       .from('server_nodes')
       .select('*')
       .eq('id', nodeId)
       .single();
 
     if (nodeError || !node) {
+      console.error('Node fetch error:', nodeError);
       return new Response(
         JSON.stringify({ error: 'Node nicht gefunden' }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -73,7 +83,7 @@ serve(async (req) => {
     }
 
     // Check if user owns this node or is admin
-    const { data: isAdmin } = await supabase
+    const { data: isAdmin } = await supabaseAdmin
       .rpc('has_role', { _user_id: user.id, _role: 'admin' });
 
     if (node.user_id !== user.id && !isAdmin) {
@@ -87,20 +97,13 @@ serve(async (req) => {
 
     let result: TestResult;
 
-    // Simulate connection test
-    // In a real implementation, this would:
-    // 1. For Linux: Attempt SSH connection using ssh2 library
-    // 2. For Windows: Attempt WinRM connection
-    // 3. Execute a command to check if the path exists
-    
-    // For demonstration, we'll simulate the test based on host reachability
     try {
       // Try to reach the host (basic connectivity check)
       const connectionTest = await testHostReachability(node.host, node.port);
       
       if (connectionTest.success) {
-        // Simulate path check (in real implementation, would execute remote command)
-        const pathTest = await simulatePathCheck(node.os_type, node.game_path);
+        // Validate path format
+        const pathTest = validatePath(node.os_type, node.game_path);
         
         if (pathTest.success) {
           result = {
@@ -108,14 +111,14 @@ serve(async (req) => {
             connectionTest: true,
             pathTest: true,
             message: 'Verbindung erfolgreich',
-            details: `Server erreichbar. Pfad "${node.game_path}" ist verfügbar.`
+            details: `Server erreichbar auf ${node.host}:${node.port}. Pfad "${node.game_path}" ist gültig.`
           };
         } else {
           result = {
             success: false,
             connectionTest: true,
             pathTest: false,
-            message: 'Pfad nicht erreichbar',
+            message: 'Pfad ungültig',
             details: pathTest.error
           };
         }
@@ -142,7 +145,7 @@ serve(async (req) => {
     // Update node status in database
     const newStatus = result.success ? 'online' : (result.connectionTest ? 'error' : 'offline');
     
-    await supabase
+    await supabaseAdmin
       .from('server_nodes')
       .update({ 
         status: newStatus,
@@ -186,7 +189,7 @@ async function testHostReachability(host: string, port: number): Promise<{ succe
     const errorMessage = error instanceof Error ? error.message : 'Verbindung fehlgeschlagen';
     
     if (errorMessage.includes('Zeitüberschreitung')) {
-      return { success: false, error: `Server ${host}:${port} antwortet nicht (Zeitüberschreitung)` };
+      return { success: false, error: `Server ${host}:${port} antwortet nicht (Zeitüberschreitung nach 5s)` };
     }
     if (errorMessage.includes('Connection refused')) {
       return { success: false, error: `Verbindung abgelehnt auf ${host}:${port}. Ist der SSH/WinRM Dienst aktiv?` };
@@ -202,14 +205,12 @@ async function testHostReachability(host: string, port: number): Promise<{ succe
   }
 }
 
-// Simulate path check (in production, this would execute a remote command)
-async function simulatePathCheck(osType: string, gamePath: string): Promise<{ success: boolean; error?: string }> {
-  // Basic path validation
+// Validate path format based on OS
+function validatePath(osType: string, gamePath: string): { success: boolean; error?: string } {
   if (!gamePath || gamePath.length === 0) {
     return { success: false, error: 'Kein Installationspfad angegeben' };
   }
 
-  // Validate path format based on OS
   if (osType === 'windows') {
     // Windows path validation (e.g., C:\GameServers)
     const windowsPathRegex = /^[a-zA-Z]:\\[\w\s\\-_.]*$/;
@@ -224,10 +225,5 @@ async function simulatePathCheck(osType: string, gamePath: string): Promise<{ su
     }
   }
 
-  // In production, you would execute:
-  // Linux: ssh user@host "test -d /path && echo 'exists' || echo 'not found'"
-  // Windows: Invoke-Command -ComputerName host -ScriptBlock { Test-Path 'C:\path' }
-  
-  // For now, simulate success if path format is valid
   return { success: true };
 }
