@@ -6,6 +6,7 @@ import { ConsoleView } from "@/components/dashboard/ConsoleView";
 import { PlayersOnline } from "@/components/dashboard/PlayersOnline";
 import { ServerInstance } from "@/components/dashboard/ServerCard";
 import { CreateServerDialog } from "@/components/dashboard/CreateServerDialog";
+import { SettingsPage } from "@/components/settings/SettingsPage";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -65,10 +66,7 @@ const Index = () => {
         )}
         
         {activeTab === "settings" && (
-          <div className="space-y-6">
-            <h1 className="text-3xl font-bold">Einstellungen</h1>
-            <p className="text-muted-foreground">Panel und Server Konfiguration</p>
-          </div>
+          <SettingsPage />
         )}
       </main>
     </div>
