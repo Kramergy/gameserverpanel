@@ -7,9 +7,12 @@ import {
   Settings, 
   Bell,
   Plus,
-  Gamepad2
+  Gamepad2,
+  LogOut,
+  Shield
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
 
 interface SidebarProps {
   activeTab: string;
@@ -26,6 +29,11 @@ const navItems = [
 ];
 
 export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
+  const { profile, role, signOut, isAdmin } = useAuth();
+
+  const displayName = profile?.username || profile?.email?.split("@")[0] || "Benutzer";
+  const initials = displayName.slice(0, 2).toUpperCase();
+
   return (
     <aside className="fixed left-0 top-0 h-screen w-64 bg-sidebar border-r border-sidebar-border flex flex-col">
       {/* Logo */}
@@ -68,18 +76,30 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
 
       {/* User */}
       <div className="p-4 border-t border-sidebar-border">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 mb-3">
           <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center">
-            <span className="text-sm font-medium">AD</span>
+            <span className="text-sm font-medium">{initials}</span>
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">Admin</p>
-            <p className="text-xs text-muted-foreground truncate">admin@server.de</p>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium truncate">{displayName}</p>
+              {isAdmin && (
+                <Shield className="w-4 h-4 text-warning shrink-0" />
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground truncate capitalize">{role || "Benutzer"}</p>
           </div>
           <button className="p-2 hover:bg-secondary rounded-lg transition-colors">
             <Bell className="w-5 h-5 text-muted-foreground" />
           </button>
         </div>
+        <button 
+          onClick={signOut}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary/50 rounded-lg transition-colors"
+        >
+          <LogOut className="w-4 h-4" />
+          <span>Abmelden</span>
+        </button>
       </div>
     </aside>
   );
