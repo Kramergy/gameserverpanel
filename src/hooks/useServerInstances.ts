@@ -124,11 +124,56 @@ export function useServerInstances() {
     },
   });
 
+  const updateServerStatus = useMutation({
+    mutationFn: async ({ serverId, status }: { serverId: string; status: "online" | "offline" | "starting" | "installing" }) => {
+      const { error } = await supabase
+        .from("server_instances")
+        .update({ status })
+        .eq("id", serverId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["server-instances"] });
+    },
+    onError: (error) => {
+      toast.error("Fehler: " + error.message);
+    },
+  });
+
+  const startServer = async (serverId: string) => {
+    toast.info("Server wird gestartet...");
+    await updateServerStatus.mutateAsync({ serverId, status: "starting" });
+    // Simulate startup delay
+    setTimeout(async () => {
+      await updateServerStatus.mutateAsync({ serverId, status: "online" });
+      toast.success("Server gestartet!");
+    }, 2000);
+  };
+
+  const stopServer = async (serverId: string) => {
+    toast.info("Server wird gestoppt...");
+    await updateServerStatus.mutateAsync({ serverId, status: "offline" });
+    toast.success("Server gestoppt");
+  };
+
+  const restartServer = async (serverId: string) => {
+    toast.info("Server wird neu gestartet...");
+    await updateServerStatus.mutateAsync({ serverId, status: "starting" });
+    setTimeout(async () => {
+      await updateServerStatus.mutateAsync({ serverId, status: "online" });
+      toast.success("Server neu gestartet!");
+    }, 3000);
+  };
+
   return {
     servers,
     isLoading,
     error,
     createServer,
     deleteServer,
+    startServer,
+    stopServer,
+    restartServer,
   };
 }
