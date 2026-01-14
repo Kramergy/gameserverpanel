@@ -1136,23 +1136,26 @@ AGENTEOF
 
 chmod +x "\\$AGENT_PATH/agent.sh"
 
-# Create systemd service
-cat > /etc/systemd/system/gameserver-agent.service << EOF
+# Create systemd service with hardcoded paths (variables already substituted)
+cat > /etc/systemd/system/gameserver-agent.service << 'SERVICEEOF'
 [Unit]
 Description=GameServer Panel Agent
-After=network.target
+After=network.target network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=\\$AGENT_PATH/agent.sh "\\$GAME_PATH" "\\$WS_URL"
+ExecStart=/opt/gameserver-agent/agent.sh "${gamePath}" "${wsUrl}"
 Restart=always
 RestartSec=5
+User=root
 StandardOutput=journal
 StandardError=journal
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 
 [Install]
 WantedBy=multi-user.target
-EOF
+SERVICEEOF
 
 # Enable and start service
 systemctl daemon-reload
