@@ -1,6 +1,7 @@
-import { Play, Square, RotateCcw, Settings, Users, Cpu, HardDrive, Wifi, Trash2, Loader2, Server } from "lucide-react";
+import { Play, Square, RotateCcw, Settings, Users, Cpu, HardDrive, Wifi, Trash2, Loader2, Server, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
+import { ServerLogsDialog } from "./ServerLogsDialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -49,6 +50,7 @@ interface ServerCardProps {
 
 export function ServerCard({ server, onSelect, onStart, onStop, onRestart, onDelete }: ServerCardProps) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [logsDialogOpen, setLogsDialogOpen] = useState(false);
   
   const statusClasses: Record<string, string> = {
     online: "status-online",
@@ -225,6 +227,13 @@ export function ServerCard({ server, onSelect, onStart, onStop, onRestart, onDel
               <Trash2 className="w-4 h-4" />
             </button>
             <button 
+              onClick={(e) => handleAction(e, () => setLogsDialogOpen(true))}
+              className="p-2 rounded-lg bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+              title="Timeline / Logs"
+            >
+              <FileText className="w-4 h-4" />
+            </button>
+            <button 
               className="p-2 rounded-lg bg-secondary text-muted-foreground hover:text-foreground transition-colors"
               title="Einstellungen"
             >
@@ -253,6 +262,13 @@ export function ServerCard({ server, onSelect, onStart, onStop, onRestart, onDel
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ServerLogsDialog
+        open={logsDialogOpen}
+        onOpenChange={setLogsDialogOpen}
+        serverId={server.id}
+        serverName={server.name}
+      />
     </>
   );
 }
