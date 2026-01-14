@@ -232,8 +232,7 @@ export function ServerNodesSettings() {
                           variant="outline"
                           size="icon"
                           onClick={() => setCommandNode(node)}
-                          title="Befehle senden"
-                          disabled={node.status !== 'online'}
+                          title="Befehle senden / Agent installieren"
                         >
                           <Terminal className="h-4 w-4" />
                         </Button>
