@@ -8,22 +8,8 @@ interface ConsoleMessage {
   message: string;
 }
 
-const demoMessages: ConsoleMessage[] = [
-  { id: "1", timestamp: "14:32:01", type: "info", message: "[Server] Starting Minecraft Server..." },
-  { id: "2", timestamp: "14:32:02", type: "info", message: "[Server] Loading properties..." },
-  { id: "3", timestamp: "14:32:03", type: "success", message: "[Server] Done! Server is ready." },
-  { id: "4", timestamp: "14:32:15", type: "info", message: "[Server] Player123 joined the game" },
-  { id: "5", timestamp: "14:32:18", type: "warn", message: "[Server] Can't keep up! Is the server overloaded?" },
-  { id: "6", timestamp: "14:32:45", type: "info", message: "[Server] Player456 joined the game" },
-  { id: "7", timestamp: "14:33:02", type: "command", message: "> /list" },
-  { id: "8", timestamp: "14:33:02", type: "info", message: "[Server] There are 2/20 players online: Player123, Player456" },
-  { id: "9", timestamp: "14:34:12", type: "error", message: "[Server] Error: Could not pass event PlayerMoveEvent" },
-  { id: "10", timestamp: "14:35:00", type: "info", message: "[Server] Saving world..." },
-  { id: "11", timestamp: "14:35:01", type: "success", message: "[Server] World saved successfully." },
-];
-
 export function ConsoleView() {
-  const [messages, setMessages] = useState<ConsoleMessage[]>(demoMessages);
+  const [messages, setMessages] = useState<ConsoleMessage[]>([]);
   const [command, setCommand] = useState("");
   const consoleRef = useRef<HTMLDivElement>(null);
 
@@ -78,12 +64,18 @@ export function ConsoleView() {
         ref={consoleRef}
         className="console-output mb-4 h-80"
       >
-        {messages.map((msg) => (
-          <div key={msg.id} className="flex gap-3 py-0.5">
-            <span className="text-muted-foreground/60 shrink-0">[{msg.timestamp}]</span>
-            <span className={getMessageColor(msg.type)}>{msg.message}</span>
+        {messages.length === 0 ? (
+          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+            Keine Konsolenausgabe vorhanden
           </div>
-        ))}
+        ) : (
+          messages.map((msg) => (
+            <div key={msg.id} className="flex gap-3 py-0.5">
+              <span className="text-muted-foreground/60 shrink-0">[{msg.timestamp}]</span>
+              <span className={getMessageColor(msg.type)}>{msg.message}</span>
+            </div>
+          ))
+        )}
       </div>
 
       <div className="flex gap-2">
