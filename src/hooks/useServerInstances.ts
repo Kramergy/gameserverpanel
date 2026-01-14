@@ -73,29 +73,64 @@ export function useServerInstances() {
   useEffect(() => {
     if (!user) return;
 
+    console.log("Setting up realtime subscription for user:", user.id);
+
     const channel = supabase
-      .channel("server-instances-realtime")
+      .channel(`server-instances-${user.id}`)
       .on(
         "postgres_changes",
         {
-          event: "*",
+          event: "INSERT",
           schema: "public",
           table: "server_instances",
+          filter: `user_id=eq.${user.id}`,
         },
         (payload) => {
-          console.log("Server instance changed:", payload);
-          // Immediately refetch to get the latest data
+          console.log("Server instance INSERT:", payload);
           queryClient.invalidateQueries({ queryKey: ["server-instances"] });
         }
       )
-      .subscribe((status) => {
-        console.log("Realtime subscription status:", status);
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "server_instances",
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          console.log("Server instance UPDATE:", payload);
+          queryClient.invalidateQueries({ queryKey: ["server-instances"] });
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "server_instances",
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          console.log("Server instance DELETE:", payload);
+          queryClient.invalidateQueries({ queryKey: ["server-instances"] });
+        }
+      )
+      .subscribe((status, err) => {
+        console.log("Realtime subscription status:", status, err);
+        if (status === "SUBSCRIBED") {
+          console.log("Successfully subscribed to server instances changes");
+        }
+        if (err) {
+          console.error("Realtime subscription error:", err);
+        }
       });
 
     return () => {
+      console.log("Removing realtime channel");
       supabase.removeChannel(channel);
     };
-  }, [user, queryClient]);
+  }, [user?.id, queryClient]);
 
   const createServer = useMutation({
     mutationFn: async (input: CreateServerInput) => {
