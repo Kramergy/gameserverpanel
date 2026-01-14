@@ -69,12 +69,12 @@ export function useServerInstances() {
     enabled: !!user,
   });
 
-  // Realtime subscription
+  // Realtime subscription for instant updates
   useEffect(() => {
     if (!user) return;
 
     const channel = supabase
-      .channel("server-instances-changes")
+      .channel("server-instances-realtime")
       .on(
         "postgres_changes",
         {
@@ -82,11 +82,15 @@ export function useServerInstances() {
           schema: "public",
           table: "server_instances",
         },
-        () => {
+        (payload) => {
+          console.log("Server instance changed:", payload);
+          // Immediately refetch to get the latest data
           queryClient.invalidateQueries({ queryKey: ["server-instances"] });
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log("Realtime subscription status:", status);
+      });
 
     return () => {
       supabase.removeChannel(channel);
