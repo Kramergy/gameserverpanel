@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useServerNodes, ServerNode } from "@/hooks/useServerNodes";
-import { Loader2, Server, Key, Lock, Copy, Check, Download, Zap } from "lucide-react";
+import { Loader2, Server, Key, Lock, Copy, Check, Download, Zap, Terminal } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -31,7 +31,7 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
   const [osType, setOsType] = useState<"linux" | "windows">("linux");
   const [gamePath, setGamePath] = useState("/home/gameserver");
   const [copied, setCopied] = useState(false);
-  const [connectionMethod, setConnectionMethod] = useState<"agent" | "manual">("agent");
+  const [connectionMethod, setConnectionMethod] = useState<"agent" | "ssh" | "manual">("agent");
   const [isGeneratingAgent, setIsGeneratingAgent] = useState(false);
   const [agentScript, setAgentScript] = useState<string | null>(null);
 
@@ -55,7 +55,7 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
     if (!editNode) {
       if (osType === "windows") {
         setGamePath("C:\\GameServers");
-        setPort(3389);
+        setPort(connectionMethod === "ssh" ? 22 : 3389);
         setUsername("Administrator");
         setConnectionMethod("agent");
       } else {
@@ -66,6 +66,19 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
       }
     }
   }, [osType, editNode]);
+
+  // Update port when connection method changes for Windows
+  useEffect(() => {
+    if (!editNode && osType === "windows") {
+      if (connectionMethod === "ssh") {
+        setPort(22);
+      } else if (connectionMethod === "manual") {
+        setPort(5985);
+      } else {
+        setPort(3389);
+      }
+    }
+  }, [connectionMethod, osType, editNode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -294,15 +307,19 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
           {osType === "windows" && !editNode && (
             <div className="space-y-3">
               <Label>Verbindungsmethode</Label>
-              <Tabs value={connectionMethod} onValueChange={(v) => setConnectionMethod(v as "agent" | "manual")}>
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="agent" className="flex items-center gap-2">
-                    <Zap className="h-4 w-4" />
-                    Agent (Empfohlen)
+              <Tabs value={connectionMethod} onValueChange={(v) => setConnectionMethod(v as "agent" | "ssh" | "manual")}>
+                <TabsList className="grid w-full grid-cols-3">
+                  <TabsTrigger value="agent" className="flex items-center gap-1 text-xs">
+                    <Zap className="h-3 w-3" />
+                    Agent
                   </TabsTrigger>
-                  <TabsTrigger value="manual" className="flex items-center gap-2">
-                    <Server className="h-4 w-4" />
-                    Manuell
+                  <TabsTrigger value="ssh" className="flex items-center gap-1 text-xs">
+                    <Terminal className="h-3 w-3" />
+                    SSH
+                  </TabsTrigger>
+                  <TabsTrigger value="manual" className="flex items-center gap-1 text-xs">
+                    <Server className="h-3 w-3" />
+                    WinRM
                   </TabsTrigger>
                 </TabsList>
                 <TabsContent value="agent" className="mt-3">
@@ -310,12 +327,34 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
                     <div className="flex items-start gap-2">
                       <span className="text-lg">✨</span>
                       <div>
-                        <p className="font-medium text-sm">Einfachste Methode</p>
+                        <p className="font-medium text-sm">Empfohlen</p>
                         <p className="text-xs text-muted-foreground mt-1">
-                          Ein kleines Script wird auf deinem Windows Server installiert und verbindet sich automatisch. 
+                          Ein Script wird auf deinem Server installiert und verbindet sich automatisch. 
                           <strong> Keine Firewall-Konfiguration nötig!</strong>
                         </p>
                       </div>
+                    </div>
+                  </div>
+                </TabsContent>
+                <TabsContent value="ssh" className="mt-3">
+                  <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg space-y-3">
+                    <div className="flex items-start gap-2">
+                      <span className="text-lg">🔐</span>
+                      <div>
+                        <p className="font-medium text-sm">OpenSSH (Windows 2019+)</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Nutzt den eingebauten OpenSSH Server von Windows. Gleiche Methode wie Linux.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="p-3 bg-background/50 rounded border">
+                      <p className="text-xs font-medium mb-2">OpenSSH auf Windows aktivieren:</p>
+                      <pre className="text-xs text-muted-foreground bg-muted/50 p-2 rounded overflow-x-auto">
+{`# PowerShell als Admin ausführen:
+Add-WindowsCapability -Online -Name OpenSSH.Server
+Start-Service sshd
+Set-Service -Name sshd -StartupType 'Automatic'`}
+                      </pre>
                     </div>
                   </div>
                 </TabsContent>
@@ -324,9 +363,9 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
                     <div className="flex items-start gap-2">
                       <span className="text-lg">⚙️</span>
                       <div>
-                        <p className="font-medium text-sm">Manuelle Konfiguration</p>
+                        <p className="font-medium text-sm">WinRM (Manuell)</p>
                         <p className="text-xs text-muted-foreground mt-1">
-                          Erfordert WinRM-Einrichtung und Firewall-Freigaben.
+                          Erfordert WinRM-Einrichtung und Firewall-Freigaben auf Port 5985.
                         </p>
                       </div>
                     </div>
@@ -395,8 +434,8 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
               )}
             </div>
 
-            {/* Auth Type - Only show for Linux */}
-            {osType === "linux" && (
+            {/* Auth Type - Show for Linux or Windows with SSH */}
+            {(osType === "linux" || (osType === "windows" && connectionMethod === "ssh")) && (
               <div className="space-y-2">
                 <Label>Authentifizierung</Label>
                 <RadioGroup 
