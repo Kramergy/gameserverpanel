@@ -12,7 +12,8 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useServerNodes, ServerNode } from "@/hooks/useServerNodes";
-import { Loader2, Server, Key, Lock, Copy, Check, Download, Zap, Terminal } from "lucide-react";
+import { Loader2, Server, Key, Lock, Copy, Check, Download, Zap, Terminal, Home, Globe } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -32,6 +33,7 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
   const [gamePath, setGamePath] = useState("/home/gameserver");
   const [copied, setCopied] = useState(false);
   const [connectionMethod, setConnectionMethod] = useState<"agent" | "ssh" | "manual">("agent");
+  const [isLocalServer, setIsLocalServer] = useState(false);
   const [isGeneratingAgent, setIsGeneratingAgent] = useState(false);
   const [agentScript, setAgentScript] = useState<string | null>(null);
 
@@ -100,7 +102,7 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
     } else {
       const result = await createNode.mutateAsync({
         name,
-        host,
+        host: isLocalServer && connectionMethod === "agent" ? "auto-detect" : host,
         port,
         username,
         auth_type: authType,
@@ -166,6 +168,7 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
     setCopied(false);
     setAgentScript(null);
     setConnectionMethod("agent");
+    setIsLocalServer(false);
     onOpenChange(false);
   };
 
@@ -322,7 +325,7 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
                     WinRM
                   </TabsTrigger>
                 </TabsList>
-                <TabsContent value="agent" className="mt-3">
+                <TabsContent value="agent" className="mt-3 space-y-3">
                   <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
                     <div className="flex items-start gap-2">
                       <span className="text-lg">✨</span>
@@ -335,6 +338,43 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
                       </div>
                     </div>
                   </div>
+                  
+                  {/* Local Server Option */}
+                  <div className="flex items-start space-x-3 p-3 rounded-lg border border-border bg-muted/30">
+                    <Checkbox 
+                      id="local-server" 
+                      checked={isLocalServer}
+                      onCheckedChange={(checked) => setIsLocalServer(checked === true)}
+                    />
+                    <div className="flex-1 space-y-1">
+                      <label 
+                        htmlFor="local-server" 
+                        className="text-sm font-medium leading-none cursor-pointer flex items-center gap-2"
+                      >
+                        <Home className="h-4 w-4" />
+                        Lokaler Server (Heimnetzwerk)
+                      </label>
+                      <p className="text-xs text-muted-foreground">
+                        Für Server hinter NAT/Firewall. Die IP-Adresse wird automatisch erkannt.
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {isLocalServer && (
+                    <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                      <div className="flex items-start gap-2">
+                        <Globe className="h-4 w-4 text-blue-500 mt-0.5" />
+                        <div className="text-xs space-y-1">
+                          <p className="font-medium">Perfekt für Heim-PCs!</p>
+                          <ul className="text-muted-foreground space-y-0.5">
+                            <li>• Keine Port-Weiterleitung nötig</li>
+                            <li>• IP-Adresse wird automatisch erkannt</li>
+                            <li>• Funktioniert hinter jeder Firewall</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </TabsContent>
                 <TabsContent value="ssh" className="mt-3">
                   <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg space-y-3">
@@ -394,29 +434,46 @@ Set-Service -Name sshd -StartupType 'Automatic'`}
           <div className="space-y-4 p-4 bg-secondary/30 rounded-lg">
             <p className="text-sm font-medium">Verbindungsdaten</p>
             
-            <div className="grid grid-cols-3 gap-3">
-              <div className="col-span-2 space-y-2">
-                <Label htmlFor="host">IP-Adresse oder Hostname</Label>
-                <Input
-                  id="host"
-                  value={host}
-                  onChange={(e) => setHost(e.target.value)}
-                  placeholder="192.168.1.100"
-                  required
-                />
+            {/* Show IP field only if not local server with agent */}
+            {!(isLocalServer && osType === "windows" && connectionMethod === "agent") && (
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2 space-y-2">
+                  <Label htmlFor="host">IP-Adresse oder Hostname</Label>
+                  <Input
+                    id="host"
+                    value={host}
+                    onChange={(e) => setHost(e.target.value)}
+                    placeholder="192.168.1.100"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="port">Port</Label>
+                  <Input
+                    id="port"
+                    type="number"
+                    value={port}
+                    onChange={(e) => setPort(Number(e.target.value))}
+                    min={1}
+                    max={65535}
+                  />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="port">Port</Label>
-                <Input
-                  id="port"
-                  type="number"
-                  value={port}
-                  onChange={(e) => setPort(Number(e.target.value))}
-                  min={1}
-                  max={65535}
-                />
+            )}
+            
+            {/* Auto-detect info for local servers */}
+            {isLocalServer && osType === "windows" && connectionMethod === "agent" && (
+              <div className="p-3 bg-muted/50 rounded-lg border border-border">
+                <div className="flex items-center gap-2 text-sm">
+                  <Globe className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-muted-foreground">IP-Adresse:</span>
+                  <span className="font-medium">Wird automatisch erkannt</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1 ml-6">
+                  Der Agent übermittelt seine IP beim ersten Verbinden
+                </p>
               </div>
-            </div>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="username">Benutzername</Label>

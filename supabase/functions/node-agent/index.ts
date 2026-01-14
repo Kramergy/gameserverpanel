@@ -77,7 +77,7 @@ async function handleWebSocket(req: Request): Promise<Response> {
       })
       .eq('id', node.id);
 
-    socket.send(JSON.stringify({ type: 'connected', nodeId: node.id }));
+    socket.send(JSON.stringify({ type: 'connected', nodeId: node.id, requestSystemInfo: true }));
     
     // Send any pending commands
     await sendPendingCommands(node.id, socket, supabase);
@@ -116,6 +116,17 @@ async function handleWebSocket(req: Request): Promise<Response> {
 
       if (message.type === 'system_info') {
         console.log(`System info from ${node.name}:`, message.data);
+        
+        // Auto-update host IP if it was set to auto-detect
+        if (message.data?.local_ip && (node.host === 'auto-detect' || node.host === '0.0.0.0')) {
+          const detectedIp = message.data.public_ip || message.data.local_ip;
+          console.log(`Auto-updating host IP for ${node.name}: ${detectedIp}`);
+          
+          await supabase
+            .from('server_nodes')
+            .update({ host: detectedIp })
+            .eq('id', node.id);
+        }
       }
     } catch (err) {
       console.error('Error processing message:', err);
@@ -539,6 +550,21 @@ while ($retryCount -lt $maxRetries) {
         $ws.ConnectAsync($uri, $cts.Token).Wait()
         Write-Host "Connected!" -ForegroundColor Green
         $retryCount = 0
+        
+        # Send initial system info with IP addresses
+        $localIp = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch 'Loopback' -and $_.PrefixOrigin -ne 'WellKnown' } | Select-Object -First 1).IPAddress
+        $publicIp = try { (Invoke-RestMethod -Uri 'https://api.ipify.org?format=json' -TimeoutSec 5).ip } catch { $null }
+        $sysInfo = @{
+            type = "system_info"
+            data = @{
+                hostname = $env:COMPUTERNAME
+                local_ip = $localIp
+                public_ip = $publicIp
+                os = (Get-WmiObject Win32_OperatingSystem).Caption
+                game_path = $GamePath
+            }
+        } | ConvertTo-Json -Depth 5
+        Send-Message -ws $ws -message $sysInfo -cts $cts
         
         $buffer = New-Object byte[] 65536
         $heartbeatTimer = [System.Diagnostics.Stopwatch]::StartNew()
