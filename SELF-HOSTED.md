@@ -40,9 +40,11 @@ npm run dev
 ```bash
 npm install
 # API URL in .env setzen:
-echo "VITE_API_URL=http://localhost:3001" > .env
+echo "VITE_API_URL=http://localhost:3001" > .env.local
 npm run dev
 ```
+
+Das Frontend verbindet sich automatisch mit dem Backend unter der angegebenen URL.
 
 ## 🔧 Konfiguration
 

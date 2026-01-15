@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { useAuth } from "./useAuth";
 import { toast } from "sonner";
 
@@ -17,6 +17,7 @@ export interface ServerNode {
   last_check: string | null;
   created_at: string;
   updated_at: string;
+  agent_token?: string;
 }
 
 export interface CreateNodeInput {
@@ -38,12 +39,8 @@ export function useServerNodes() {
     queryFn: async () => {
       if (!user) return [];
       
-      const { data, error } = await supabase
-        .from("server_nodes")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
+      const { data, error } = await api.getNodes();
+      if (error) throw new Error(error);
       return data as ServerNode[];
     },
     enabled: !!user,
@@ -53,23 +50,8 @@ export function useServerNodes() {
     mutationFn: async (input: CreateNodeInput) => {
       if (!user) throw new Error("Nicht eingeloggt");
 
-      const { data, error } = await supabase
-        .from("server_nodes")
-        .insert({
-          user_id: user.id,
-          name: input.name,
-          host: input.host,
-          port: input.port,
-          username: input.username,
-          auth_type: input.auth_type,
-          os_type: input.os_type,
-          game_path: input.game_path,
-          status: "unknown",
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
+      const { data, error } = await api.createNode(input);
+      if (error) throw new Error(error);
       return data as ServerNode;
     },
     onSuccess: () => {
@@ -83,12 +65,8 @@ export function useServerNodes() {
 
   const updateNode = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<ServerNode> & { id: string }) => {
-      const { error } = await supabase
-        .from("server_nodes")
-        .update(updates)
-        .eq("id", id);
-
-      if (error) throw error;
+      const { error } = await api.updateNode(id, updates);
+      if (error) throw new Error(error);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["server-nodes"] });
@@ -101,12 +79,8 @@ export function useServerNodes() {
 
   const deleteNode = useMutation({
     mutationFn: async (nodeId: string) => {
-      const { error } = await supabase
-        .from("server_nodes")
-        .delete()
-        .eq("id", nodeId);
-
-      if (error) throw error;
+      const { error } = await api.deleteNode(nodeId);
+      if (error) throw new Error(error);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["server-nodes"] });

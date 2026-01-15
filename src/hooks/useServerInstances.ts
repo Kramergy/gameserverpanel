@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { useAuth } from "./useAuth";
 import { toast } from "sonner";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 export interface ServerInstance {
   id: string;
@@ -44,91 +44,33 @@ export interface CreateServerInput {
 export function useServerInstances() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const pollingInterval = useRef<NodeJS.Timeout | null>(null);
 
   const { data: servers = [], isLoading, error } = useQuery({
     queryKey: ["server-instances", user?.id],
     queryFn: async () => {
       if (!user) return [];
       
-      const { data, error } = await supabase
-        .from("server_instances")
-        .select(`
-          *,
-          node:server_nodes (
-            id,
-            name,
-            host,
-            status
-          )
-        `)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
+      const { data, error } = await api.getServers();
+      if (error) throw new Error(error);
       return data as ServerInstance[];
     },
     enabled: !!user,
   });
 
-  // Realtime subscription for instant updates
+  // Polling for updates (since we don't have WebSockets in self-hosted version)
   useEffect(() => {
     if (!user) return;
 
-    console.log("Setting up realtime subscription for user:", user.id);
-
-    const channel = supabase
-      .channel(`server-instances-${user.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "server_instances",
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          console.log("Server instance INSERT:", payload);
-          queryClient.invalidateQueries({ queryKey: ["server-instances"] });
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "server_instances",
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          console.log("Server instance UPDATE:", payload);
-          queryClient.invalidateQueries({ queryKey: ["server-instances"] });
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "DELETE",
-          schema: "public",
-          table: "server_instances",
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          console.log("Server instance DELETE:", payload);
-          queryClient.invalidateQueries({ queryKey: ["server-instances"] });
-        }
-      )
-      .subscribe((status, err) => {
-        console.log("Realtime subscription status:", status, err);
-        if (status === "SUBSCRIBED") {
-          console.log("Successfully subscribed to server instances changes");
-        }
-        if (err) {
-          console.error("Realtime subscription error:", err);
-        }
-      });
+    // Poll every 5 seconds for updates
+    pollingInterval.current = setInterval(() => {
+      queryClient.invalidateQueries({ queryKey: ["server-instances"] });
+    }, 5000);
 
     return () => {
-      console.log("Removing realtime channel");
-      supabase.removeChannel(channel);
+      if (pollingInterval.current) {
+        clearInterval(pollingInterval.current);
+      }
     };
   }, [user?.id, queryClient]);
 
@@ -136,23 +78,8 @@ export function useServerInstances() {
     mutationFn: async (input: CreateServerInput) => {
       if (!user) throw new Error("Nicht eingeloggt");
 
-      const { data, error } = await supabase
-        .from("server_instances")
-        .insert({
-          user_id: user.id,
-          node_id: input.node_id,
-          name: input.name,
-          game: input.game,
-          game_icon: input.game_icon,
-          port: input.port,
-          max_players: input.max_players,
-          ram_allocated: input.ram_allocated,
-          status: "installing",
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
+      const { data, error } = await api.createServer(input);
+      if (error) throw new Error(error);
       return data as ServerInstance;
     },
     onSuccess: () => {
@@ -166,35 +93,22 @@ export function useServerInstances() {
 
   const deleteServer = useMutation({
     mutationFn: async (serverId: string) => {
-      // Find the server to get node_id and install_path
       const server = servers.find(s => s.id === serverId);
       
       // If server has a node and install path, send delete command to agent
       if (server?.node_id && server?.install_path) {
         try {
-          await supabase.functions.invoke("node-agent/send-command", {
-            body: {
-              nodeId: server.node_id,
-              commandType: "delete_gameserver",
-              commandData: {
-                serverId,
-                installPath: server.install_path,
-              },
-            },
+          await api.sendCommand(server.node_id, "delete_gameserver", {
+            serverId,
+            installPath: server.install_path,
           });
         } catch (err) {
           console.error("Error sending delete command to agent:", err);
-          // Continue with database deletion even if agent command fails
         }
       }
 
-      // Delete from database
-      const { error } = await supabase
-        .from("server_instances")
-        .delete()
-        .eq("id", serverId);
-
-      if (error) throw error;
+      const { error } = await api.deleteServer(serverId);
+      if (error) throw new Error(error);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["server-instances"] });
@@ -206,13 +120,9 @@ export function useServerInstances() {
   });
 
   const updateServerStatus = useMutation({
-    mutationFn: async ({ serverId, status }: { serverId: string; status: "online" | "offline" | "starting" | "installing" | "installed" | "error" }) => {
-      const { error } = await supabase
-        .from("server_instances")
-        .update({ status })
-        .eq("id", serverId);
-
-      if (error) throw error;
+    mutationFn: async ({ serverId, status }: { serverId: string; status: ServerInstance["status"] }) => {
+      const { error } = await api.updateServer(serverId, { status });
+      if (error) throw new Error(error);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["server-instances"] });
@@ -233,21 +143,14 @@ export function useServerInstances() {
     await updateServerStatus.mutateAsync({ serverId, status: "starting" });
 
     try {
-      // Send start command to agent
-      const { error } = await supabase.functions.invoke("node-agent/send-command", {
-        body: {
-          nodeId: server.node_id,
-          commandType: "start_gameserver",
-          commandData: {
-            serverId,
-            installPath: server.install_path || `C:\\GameServers\\${server.game}-${serverId}`,
-          },
-        },
+      const { error } = await api.sendCommand(server.node_id, "start_gameserver", {
+        serverId,
+        installPath: server.install_path || `C:\\GameServers\\${server.game}-${serverId}`,
       });
 
-      if (error) throw error;
+      if (error) throw new Error(error);
       
-      // Wait a bit then update status (in real app, agent would report back)
+      // Wait a bit then update status
       setTimeout(async () => {
         await updateServerStatus.mutateAsync({ serverId, status: "online" });
         toast.success("Server gestartet!");
@@ -268,19 +171,12 @@ export function useServerInstances() {
     toast.info("Server wird gestoppt...");
 
     try {
-      // Get game info for executable
-      const { error } = await supabase.functions.invoke("node-agent/send-command", {
-        body: {
-          nodeId: server.node_id,
-          commandType: "stop_gameserver",
-          commandData: {
-            serverId,
-            executable: getExecutableForGame(server.game),
-          },
-        },
+      const { error } = await api.sendCommand(server.node_id, "stop_gameserver", {
+        serverId,
+        executable: getExecutableForGame(server.game),
       });
 
-      if (error) throw error;
+      if (error) throw new Error(error);
       
       await updateServerStatus.mutateAsync({ serverId, status: "offline" });
       toast.success("Server gestoppt");

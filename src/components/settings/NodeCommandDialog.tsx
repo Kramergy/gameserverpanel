@@ -19,7 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ServerNode } from "@/hooks/useServerNodes";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { 
   Loader2, 
@@ -79,16 +79,14 @@ export function NodeCommandDialog({ open, onOpenChange, node }: NodeCommandDialo
     
     setIsGenerating(true);
     try {
-      const { data, error } = await supabase.functions.invoke('node-agent', {
-        body: { nodeId: node.id }
-      });
+      const { data, error } = await api.getAgentScript(node.id);
 
-      if (error) throw error;
+      if (error) throw new Error(error);
 
       if (node.os_type === 'windows') {
-        setInstallScript(data.windowsScript || data.installScript);
+        setInstallScript(data?.windowsScript || data?.installScript || '');
       } else {
-        setInstallScript(data.linuxScript || data.installScript);
+        setInstallScript(data?.linuxScript || data?.installScript || '');
       }
     } catch (error) {
       console.error('Error generating install script:', error);
@@ -130,15 +128,9 @@ export function NodeCommandDialog({ open, onOpenChange, node }: NodeCommandDialo
     setLastResult(null);
 
     try {
-      const { data, error } = await supabase.functions.invoke('node-agent/send-command', {
-        body: {
-          nodeId: node.id,
-          commandType,
-          commandData
-        }
-      });
+      const { data, error } = await api.sendCommand(node.id, commandType, commandData);
 
-      if (error) throw error;
+      if (error) throw new Error(error);
 
       if (data.sent) {
         toast.success("Befehl gesendet!");
@@ -164,11 +156,7 @@ export function NodeCommandDialog({ open, onOpenChange, node }: NodeCommandDialo
     const poll = async () => {
       attempts++;
       
-      const { data, error } = await supabase
-        .from('node_commands')
-        .select('*')
-        .eq('id', commandId)
-        .maybeSingle();
+      const { data, error } = await api.getCommandStatus(commandId);
 
       if (error || !data) {
         setIsLoading(false);

@@ -1,8 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { GameOption } from "@/components/dashboard/GameSelector";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 
 interface InstallProgress {
   serverId: string;
@@ -24,29 +24,19 @@ interface InstallServerInput {
 export function useGameServerInstall() {
   const queryClient = useQueryClient();
   const [installProgress, setInstallProgress] = useState<Record<string, InstallProgress>>({});
+  const pollingInterval = useRef<NodeJS.Timeout | null>(null);
 
-  // Listen for installation progress via realtime
+  // Poll for installation progress
   useEffect(() => {
-    const channel = supabase
-      .channel("install-progress")
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "server_instances",
-        },
-        (payload) => {
-          // Check if this is a status update
-          if (payload.new && payload.new.status) {
-            queryClient.invalidateQueries({ queryKey: ["server-instances"] });
-          }
-        }
-      )
-      .subscribe();
+    // Poll every 3 seconds for server instance updates
+    pollingInterval.current = setInterval(() => {
+      queryClient.invalidateQueries({ queryKey: ["server-instances"] });
+    }, 3000);
 
     return () => {
-      supabase.removeChannel(channel);
+      if (pollingInterval.current) {
+        clearInterval(pollingInterval.current);
+      }
     };
   }, [queryClient]);
 
@@ -54,28 +44,22 @@ export function useGameServerInstall() {
     mutationFn: async (input: InstallServerInput) => {
       const { serverId, nodeId, game, serverName, port, maxPlayers, ram } = input;
 
-      // Send install command to agent via edge function
-      const { data, error } = await supabase.functions.invoke("node-agent/send-command", {
-        body: {
-          nodeId,
-          commandType: "install_gameserver",
-          commandData: {
-            serverId,
-            gameId: game.id,
-            serverName,
-            installType: game.installType,
-            steamAppId: game.steamAppId,
-            downloadUrl: game.downloadUrl,
-            executable: game.executable,
-            startArgs: game.startArgs,
-            port,
-            maxPlayers,
-            ram,
-          },
-        },
+      // Send install command to agent
+      const { data, error } = await api.sendCommand(nodeId, "install_gameserver", {
+        serverId,
+        gameId: game.id,
+        serverName,
+        installType: game.installType,
+        steamAppId: game.steamAppId,
+        downloadUrl: game.downloadUrl,
+        executable: game.executable,
+        startArgs: game.startArgs,
+        port,
+        maxPlayers,
+        ram,
       });
 
-      if (error) throw error;
+      if (error) throw new Error(error);
       return data;
     },
     onSuccess: (_, variables) => {
@@ -97,24 +81,15 @@ export function useGameServerInstall() {
 
   const startServer = useMutation({
     mutationFn: async ({ nodeId, serverId, installPath }: { nodeId: string; serverId: string; installPath: string }) => {
-      const { data, error } = await supabase.functions.invoke("node-agent/send-command", {
-        body: {
-          nodeId,
-          commandType: "start_gameserver",
-          commandData: {
-            serverId,
-            installPath,
-          },
-        },
+      const { data, error } = await api.sendCommand(nodeId, "start_gameserver", {
+        serverId,
+        installPath,
       });
 
-      if (error) throw error;
+      if (error) throw new Error(error);
 
       // Update server status
-      await supabase
-        .from("server_instances")
-        .update({ status: "starting" })
-        .eq("id", serverId);
+      await api.updateServer(serverId, { status: "starting" });
 
       return data;
     },
@@ -129,24 +104,15 @@ export function useGameServerInstall() {
 
   const stopServer = useMutation({
     mutationFn: async ({ nodeId, serverId, executable }: { nodeId: string; serverId: string; executable: string }) => {
-      const { data, error } = await supabase.functions.invoke("node-agent/send-command", {
-        body: {
-          nodeId,
-          commandType: "stop_gameserver",
-          commandData: {
-            serverId,
-            executable,
-          },
-        },
+      const { data, error } = await api.sendCommand(nodeId, "stop_gameserver", {
+        serverId,
+        executable,
       });
 
-      if (error) throw error;
+      if (error) throw new Error(error);
 
       // Update server status
-      await supabase
-        .from("server_instances")
-        .update({ status: "offline" })
-        .eq("id", serverId);
+      await api.updateServer(serverId, { status: "offline" });
 
       return data;
     },
