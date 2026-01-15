@@ -6,7 +6,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { 
   CheckCircle2, 
   XCircle, 
@@ -72,12 +72,7 @@ export function ServerLogsDialog({
     const fetchLogs = async () => {
       setIsLoading(true);
       
-      const { data, error } = await supabase
-        .from("node_commands")
-        .select("*")
-        .or(`command_data->serverId.eq.${serverId},command_data->>serverId.eq.${serverId}`)
-        .order("created_at", { ascending: false })
-        .limit(20);
+      const { data, error } = await api.getServerCommands(serverId);
 
       if (error) {
         console.error("Error fetching logs:", error);
@@ -89,24 +84,11 @@ export function ServerLogsDialog({
 
     fetchLogs();
 
-    // Subscribe to realtime updates
-    const channel = supabase
-      .channel(`server-logs-${serverId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "node_commands",
-        },
-        () => {
-          fetchLogs();
-        }
-      )
-      .subscribe();
+    // Poll for updates every 3 seconds (since we don't have WebSockets)
+    const pollInterval = setInterval(fetchLogs, 3000);
 
     return () => {
-      supabase.removeChannel(channel);
+      clearInterval(pollInterval);
     };
   }, [open, serverId]);
 

@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { CreateServerDialog } from "@/components/dashboard/CreateServerDialog";
 import { ServerInstance } from "@/components/dashboard/ServerCard";
@@ -67,13 +67,9 @@ export default function ServerDetails() {
     queryKey: ["server-instance", id],
     queryFn: async () => {
       if (!id) return null;
-      const { data, error } = await supabase
-        .from("server_instances")
-        .select("*")
-        .eq("id", id)
-        .maybeSingle();
+      const { data, error } = await api.getServer(id);
       
-      if (error) throw error;
+      if (error) throw new Error(error);
       return data as ServerInstance | null;
     },
     enabled: !!id,
@@ -91,11 +87,9 @@ export default function ServerDetails() {
 
   const updateServer = useMutation({
     mutationFn: async (updates: Partial<ServerInstance>) => {
-      const { error } = await supabase
-        .from("server_instances")
-        .update(updates)
-        .eq("id", id);
-      if (error) throw error;
+      if (!id) throw new Error("Server ID fehlt");
+      const { error } = await api.updateServer(id, updates);
+      if (error) throw new Error(error);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["server-instance", id] });
@@ -108,11 +102,9 @@ export default function ServerDetails() {
 
   const updateStatus = useMutation({
     mutationFn: async (status: string) => {
-      const { error } = await supabase
-        .from("server_instances")
-        .update({ status })
-        .eq("id", id);
-      if (error) throw error;
+      if (!id) throw new Error("Server ID fehlt");
+      const { error } = await api.updateServer(id, { status });
+      if (error) throw new Error(error);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["server-instance", id] });
@@ -121,11 +113,9 @@ export default function ServerDetails() {
 
   const deleteServer = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase
-        .from("server_instances")
-        .delete()
-        .eq("id", id);
-      if (error) throw error;
+      if (!id) throw new Error("Server ID fehlt");
+      const { error } = await api.deleteServer(id);
+      if (error) throw new Error(error);
     },
     onSuccess: () => {
       toast.success("Server gelöscht");

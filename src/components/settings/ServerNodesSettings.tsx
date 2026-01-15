@@ -46,7 +46,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -92,18 +92,16 @@ export function ServerNodesSettings() {
     setTestedNodeName(node.name);
     
     try {
-      const { data, error } = await supabase.functions.invoke('test-node-connection', {
-        body: { nodeId: node.id }
-      });
+      const { data, error } = await api.testNodeConnection(node.id);
 
       if (error) {
-        toast.error("Verbindungstest fehlgeschlagen: " + error.message);
+        toast.error("Verbindungstest fehlgeschlagen: " + error);
         setTestResult({
           success: false,
           connectionTest: false,
           pathTest: false,
           message: "Test fehlgeschlagen",
-          details: error.message
+          details: error
         });
       } else {
         setTestResult(data as TestResult);

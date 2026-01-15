@@ -15,7 +15,7 @@ import { useServerNodes, ServerNode } from "@/hooks/useServerNodes";
 import { Loader2, Server, Key, Lock, Copy, Check, Download, Zap, Terminal, Home, Globe } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 
 interface AddNodeDialogProps {
   open: boolean;
@@ -123,11 +123,9 @@ export function AddNodeDialog({ open, onOpenChange, editNode }: AddNodeDialogPro
   const generateAgentScript = async (nodeId: string) => {
     setIsGeneratingAgent(true);
     try {
-      const { data, error } = await supabase.functions.invoke('node-agent', {
-        body: { nodeId }
-      });
+      const { data, error } = await api.getAgentScript(nodeId);
 
-      if (error) throw error;
+      if (error) throw new Error(error);
 
       if (data?.installScript) {
         setAgentScript(data.installScript);

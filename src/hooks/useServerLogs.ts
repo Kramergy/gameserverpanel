@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { api } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 
 export interface ServerLog {
@@ -15,20 +15,16 @@ export function useServerLogs(serverId: string | null) {
   const [logs, setLogs] = useState<ServerLog[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const { session } = useAuth();
+  const pollingInterval = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch initial logs
+  // Fetch logs
   const fetchLogs = useCallback(async () => {
     if (!serverId) return;
 
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('server_logs')
-        .select('*')
-        .eq('server_id', serverId)
-        .order('created_at', { ascending: true })
-        .limit(200);
-
+      const { data, error } = await api.getServerLogs(serverId, 200);
+      
       if (error) {
         console.error('Error fetching logs:', error);
         return;
@@ -40,9 +36,9 @@ export function useServerLogs(serverId: string | null) {
     } finally {
       setIsLoading(false);
     }
-  }, [serverId, session?.access_token]);
+  }, [serverId]);
 
-  // Set up realtime subscription
+  // Set up polling for new logs
   useEffect(() => {
     if (!serverId) {
       setLogs([]);
@@ -51,37 +47,25 @@ export function useServerLogs(serverId: string | null) {
 
     fetchLogs();
 
-    // Subscribe to new logs
-    const channel = supabase
-      .channel(`server-logs-${serverId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'server_logs',
-          filter: `server_id=eq.${serverId}`
-        },
-        (payload) => {
-          console.log('New log received:', payload);
-          const newLog = payload.new as ServerLog;
-          setLogs((prev) => [...prev, newLog]);
-        }
-      )
-      .subscribe((status) => {
-        console.log('Server logs subscription status:', status);
-      });
+    // Poll every 2 seconds for new logs
+    pollingInterval.current = setInterval(() => {
+      fetchLogs();
+    }, 2000);
 
     return () => {
-      console.log('Removing server logs channel');
-      supabase.removeChannel(channel);
+      if (pollingInterval.current) {
+        clearInterval(pollingInterval.current);
+      }
     };
   }, [serverId, fetchLogs]);
 
   // Clear logs
   const clearLogs = useCallback(() => {
     setLogs([]);
-  }, []);
+    if (serverId) {
+      api.clearServerLogs(serverId);
+    }
+  }, [serverId]);
 
   // Add a local log (for commands entered by user)
   const addLocalLog = useCallback((message: string, type: ServerLog['log_type'] = 'command') => {
