@@ -11,6 +11,27 @@ Vollständige Anleitung zur Installation des GamePanels auf Windows Server.
 
 ---
 
+## ⚡ Schnellstart mit Automatischem Script
+
+```powershell
+# PowerShell als Administrator öffnen
+
+# 1. Ausführungsrichtlinie für diese Sitzung erlauben:
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+
+# 2. Script ausführen:
+.\scripts\install-windows.ps1
+```
+
+> **💡 Hinweis:** Der `Set-ExecutionPolicy` Befehl muss nur einmal pro PowerShell-Sitzung ausgeführt werden.
+
+**Alternative: Dauerhaft erlauben (nicht empfohlen für Produktionsserver):**
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+---
+
 ## 🚀 Option 1: Docker Installation (Empfohlen)
 
 ### Docker Desktop installieren
