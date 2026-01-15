@@ -80,7 +80,7 @@ function Generate-RandomString {
 
 function Test-MySQLConnection {
     param(
-        [string]$Host,
+        [string]$Server,
         [int]$Port,
         [string]$User,
         [string]$Password,
@@ -94,7 +94,7 @@ function Test-MySQLConnection {
     
     try {
         $env:MYSQL_PWD = $Password
-        $result = & $mysqlPath -h $Host -P $Port -u $User -e "SELECT 1;" $Database 2>&1
+        $result = & $mysqlPath -h $Server -P $Port -u $User -e "SELECT 1;" $Database 2>&1
         $env:MYSQL_PWD = ""
         
         if ($LASTEXITCODE -eq 0) {
@@ -205,7 +205,7 @@ function Install-MySQL {
 
 function Setup-GamePanelDatabase {
     param(
-        [string]$Host = "localhost",
+        [string]$Server = "localhost",
         [int]$Port = 3306,
         [string]$RootUser = "root",
         [string]$RootPassword = "",
@@ -225,7 +225,7 @@ function Setup-GamePanelDatabase {
     
     # Datenbank erstellen
     $createDbSql = "CREATE DATABASE IF NOT EXISTS $DbName;"
-    $result = & $mysqlPath -h $Host -P $Port -u $RootUser -e $createDbSql 2>&1
+    $result = & $mysqlPath -h $Server -P $Port -u $RootUser -e $createDbSql 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Success "Datenbank '$DbName' erstellt"
     } else {
@@ -234,7 +234,7 @@ function Setup-GamePanelDatabase {
     
     # Benutzer erstellen
     $createUserSql = "CREATE USER IF NOT EXISTS '$DbUser'@'%' IDENTIFIED BY '$DbPassword';"
-    $result = & $mysqlPath -h $Host -P $Port -u $RootUser -e $createUserSql 2>&1
+    $result = & $mysqlPath -h $Server -P $Port -u $RootUser -e $createUserSql 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Success "Benutzer '$DbUser' erstellt"
     } else {
@@ -243,7 +243,7 @@ function Setup-GamePanelDatabase {
     
     # Berechtigungen setzen
     $grantSql = "GRANT ALL PRIVILEGES ON $DbName.* TO '$DbUser'@'%'; FLUSH PRIVILEGES;"
-    $result = & $mysqlPath -h $Host -P $Port -u $RootUser -e $grantSql 2>&1
+    $result = & $mysqlPath -h $Server -P $Port -u $RootUser -e $grantSql 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Success "Berechtigungen für '$DbUser' gesetzt"
     }
@@ -252,7 +252,7 @@ function Setup-GamePanelDatabase {
     
     # Verbindung testen
     Write-Info "Teste Datenbankverbindung..."
-    if (Test-MySQLConnection -Host $Host -Port $Port -User $DbUser -Password $DbPassword -Database $DbName) {
+    if (Test-MySQLConnection -Server $Server -Port $Port -User $DbUser -Password $DbPassword -Database $DbName) {
         Write-Success "Datenbankverbindung erfolgreich"
         return $true
     } else {
@@ -287,7 +287,7 @@ function Get-ExistingMySQLConfig {
     Write-Host ""
     Write-Info "Teste Verbindung zu ${dbHost}:${dbPort}..."
     
-    if (Test-MySQLConnection -Host $dbHost -Port $dbPort -User $dbUser -Password $dbPassword -Database $dbName) {
+    if (Test-MySQLConnection -Server $dbHost -Port $dbPort -User $dbUser -Password $dbPassword -Database $dbName) {
         Write-Success "Verbindung erfolgreich!"
         return @{
             Host = $dbHost
