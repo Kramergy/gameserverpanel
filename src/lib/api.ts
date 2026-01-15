@@ -95,39 +95,6 @@ class ApiClient {
     this.setToken(null);
   }
 
-  // Server Nodes endpoints
-  async getNodes() {
-    return this.request<any[]>('/api/nodes');
-  }
-
-  async createNode(data: any) {
-    return this.request<any>('/api/nodes', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async updateNode(id: string, data: any) {
-    return this.request<any>(`/api/nodes/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async deleteNode(id: string) {
-    return this.request(`/api/nodes/${id}`, {
-      method: 'DELETE',
-    });
-  }
-
-  async getAgentScript(nodeId: string) {
-    return this.request<{ installScript: string; windowsScript?: string; linuxScript?: string }>(`/api/nodes/${nodeId}/agent-script`);
-  }
-
-  async testNodeConnection(nodeId: string) {
-    return this.request<any>(`/api/nodes/${nodeId}/test`);
-  }
-
   // Server Instances endpoints
   async getServers() {
     return this.request<any[]>('/api/servers');
@@ -157,20 +124,36 @@ class ApiClient {
     });
   }
 
-  // Commands endpoints
-  async sendCommand(nodeId: string, commandType: string, commandData: any) {
-    return this.request<any>('/api/commands/send', {
+  // Server control endpoints
+  async startServer(id: string) {
+    return this.request<any>(`/api/servers/${id}/start`, {
       method: 'POST',
-      body: JSON.stringify({ nodeId, commandType, commandData }),
     });
   }
 
-  async getCommandStatus(commandId: string) {
-    return this.request<any>(`/api/commands/${commandId}`);
+  async stopServer(id: string) {
+    return this.request<any>(`/api/servers/${id}/stop`, {
+      method: 'POST',
+    });
   }
 
-  async getServerCommands(serverId: string) {
-    return this.request<any[]>(`/api/commands/server/${serverId}`);
+  async restartServer(id: string) {
+    return this.request<any>(`/api/servers/${id}/restart`, {
+      method: 'POST',
+    });
+  }
+
+  async installServer(id: string) {
+    return this.request<any>(`/api/servers/${id}/install`, {
+      method: 'POST',
+    });
+  }
+
+  async sendServerCommand(id: string, command: string) {
+    return this.request<any>(`/api/servers/${id}/command`, {
+      method: 'POST',
+      body: JSON.stringify({ command }),
+    });
   }
 
   // Logs endpoints
