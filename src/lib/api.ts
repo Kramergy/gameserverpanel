@@ -1,6 +1,6 @@
 // Self-hosted API client for the Node.js backend
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_URL = import.meta.env.VITE_API_URL || 'http://87.247.207.121:3001';
 
 interface ApiResponse<T = any> {
   data?: T;
