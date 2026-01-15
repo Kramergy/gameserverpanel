@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { pool } from '../db/pool';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { v4 as uuidv4 } from 'uuid';
+import { RowDataPacket, ResultSetHeader } from 'mysql2';
 
 export const nodesRouter = Router();
 
@@ -10,7 +11,7 @@ nodesRouter.use(authMiddleware);
 // Get all nodes for user
 nodesRouter.get('/', async (req: AuthRequest, res: Response) => {
   try {
-    let query = 'SELECT * FROM server_nodes WHERE user_id = $1 ORDER BY created_at DESC';
+    let query = 'SELECT * FROM server_nodes WHERE user_id = ? ORDER BY created_at DESC';
     let params: any[] = [req.userId];
 
     // Admins can see all nodes
@@ -19,8 +20,8 @@ nodesRouter.get('/', async (req: AuthRequest, res: Response) => {
       params = [];
     }
 
-    const result = await pool.query(query, params);
-    res.json(result.rows);
+    const [rows] = await pool.execute<RowDataPacket[]>(query, params);
+    res.json(rows);
   } catch (error) {
     console.error('Get nodes error:', error);
     res.status(500).json({ error: 'Fehler beim Laden der Nodes' });
@@ -30,16 +31,19 @@ nodesRouter.get('/', async (req: AuthRequest, res: Response) => {
 // Get single node
 nodesRouter.get('/:id', async (req: AuthRequest, res: Response) => {
   try {
-    const result = await pool.query(
-      'SELECT * FROM server_nodes WHERE id = $1 AND (user_id = $2 OR $3 = true)',
-      [req.params.id, req.userId, req.userRole === 'admin']
+    const isAdmin = req.userRole === 'admin';
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      isAdmin 
+        ? 'SELECT * FROM server_nodes WHERE id = ?'
+        : 'SELECT * FROM server_nodes WHERE id = ? AND user_id = ?',
+      isAdmin ? [req.params.id] : [req.params.id, req.userId]
     );
 
-    if (result.rows.length === 0) {
+    if (rows.length === 0) {
       return res.status(404).json({ error: 'Node nicht gefunden' });
     }
 
-    res.json(result.rows[0]);
+    res.json(rows[0]);
   } catch (error) {
     console.error('Get node error:', error);
     res.status(500).json({ error: 'Fehler beim Laden des Nodes' });
@@ -55,14 +59,19 @@ nodesRouter.post('/', async (req: AuthRequest, res: Response) => {
   }
 
   try {
-    const result = await pool.query(
-      `INSERT INTO server_nodes (user_id, name, host, port, username, auth_type, os_type, game_path)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING *`,
-      [req.userId, name, host, port || 22, username, auth_type || 'password', os_type || 'linux', game_path || '/home/gameserver']
+    const nodeId = uuidv4();
+    await pool.execute(
+      `INSERT INTO server_nodes (id, user_id, name, host, port, username, auth_type, os_type, game_path)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [nodeId, req.userId, name, host, port || 22, username, auth_type || 'password', os_type || 'linux', game_path || '/home/gameserver']
     );
 
-    res.status(201).json(result.rows[0]);
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      'SELECT * FROM server_nodes WHERE id = ?',
+      [nodeId]
+    );
+
+    res.status(201).json(rows[0]);
   } catch (error) {
     console.error('Create node error:', error);
     res.status(500).json({ error: 'Fehler beim Erstellen des Nodes' });
@@ -74,27 +83,40 @@ nodesRouter.put('/:id', async (req: AuthRequest, res: Response) => {
   const { name, host, port, username, auth_type, os_type, game_path, status } = req.body;
 
   try {
-    const result = await pool.query(
-      `UPDATE server_nodes 
-       SET name = COALESCE($1, name),
-           host = COALESCE($2, host),
-           port = COALESCE($3, port),
-           username = COALESCE($4, username),
-           auth_type = COALESCE($5, auth_type),
-           os_type = COALESCE($6, os_type),
-           game_path = COALESCE($7, game_path),
-           status = COALESCE($8, status),
-           updated_at = now()
-       WHERE id = $9 AND (user_id = $10 OR $11 = true)
-       RETURNING *`,
-      [name, host, port, username, auth_type, os_type, game_path, status, req.params.id, req.userId, req.userRole === 'admin']
+    const isAdmin = req.userRole === 'admin';
+    
+    // Check if node exists and user has permission
+    const [existing] = await pool.execute<RowDataPacket[]>(
+      isAdmin 
+        ? 'SELECT id FROM server_nodes WHERE id = ?'
+        : 'SELECT id FROM server_nodes WHERE id = ? AND user_id = ?',
+      isAdmin ? [req.params.id] : [req.params.id, req.userId]
     );
 
-    if (result.rows.length === 0) {
+    if (existing.length === 0) {
       return res.status(404).json({ error: 'Node nicht gefunden' });
     }
 
-    res.json(result.rows[0]);
+    await pool.execute(
+      `UPDATE server_nodes 
+       SET name = COALESCE(?, name),
+           host = COALESCE(?, host),
+           port = COALESCE(?, port),
+           username = COALESCE(?, username),
+           auth_type = COALESCE(?, auth_type),
+           os_type = COALESCE(?, os_type),
+           game_path = COALESCE(?, game_path),
+           status = COALESCE(?, status)
+       WHERE id = ?`,
+      [name, host, port, username, auth_type, os_type, game_path, status, req.params.id]
+    );
+
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      'SELECT * FROM server_nodes WHERE id = ?',
+      [req.params.id]
+    );
+
+    res.json(rows[0]);
   } catch (error) {
     console.error('Update node error:', error);
     res.status(500).json({ error: 'Fehler beim Aktualisieren des Nodes' });
@@ -104,12 +126,15 @@ nodesRouter.put('/:id', async (req: AuthRequest, res: Response) => {
 // Delete node
 nodesRouter.delete('/:id', async (req: AuthRequest, res: Response) => {
   try {
-    const result = await pool.query(
-      'DELETE FROM server_nodes WHERE id = $1 AND (user_id = $2 OR $3 = true) RETURNING id',
-      [req.params.id, req.userId, req.userRole === 'admin']
+    const isAdmin = req.userRole === 'admin';
+    const [result] = await pool.execute<ResultSetHeader>(
+      isAdmin 
+        ? 'DELETE FROM server_nodes WHERE id = ?'
+        : 'DELETE FROM server_nodes WHERE id = ? AND user_id = ?',
+      isAdmin ? [req.params.id] : [req.params.id, req.userId]
     );
 
-    if (result.rows.length === 0) {
+    if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'Node nicht gefunden' });
     }
 
@@ -123,16 +148,19 @@ nodesRouter.delete('/:id', async (req: AuthRequest, res: Response) => {
 // Test node connection
 nodesRouter.post('/:id/test', async (req: AuthRequest, res: Response) => {
   try {
-    const nodeResult = await pool.query(
-      'SELECT * FROM server_nodes WHERE id = $1 AND (user_id = $2 OR $3 = true)',
-      [req.params.id, req.userId, req.userRole === 'admin']
+    const isAdmin = req.userRole === 'admin';
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      isAdmin 
+        ? 'SELECT * FROM server_nodes WHERE id = ?'
+        : 'SELECT * FROM server_nodes WHERE id = ? AND user_id = ?',
+      isAdmin ? [req.params.id] : [req.params.id, req.userId]
     );
 
-    if (nodeResult.rows.length === 0) {
+    if (rows.length === 0) {
       return res.status(404).json({ error: 'Node nicht gefunden' });
     }
 
-    const node = nodeResult.rows[0];
+    const node = rows[0];
 
     // Basic reachability test (simplified - in production you'd do actual SSH/connection test)
     let status = 'unknown';
@@ -154,8 +182,8 @@ nodesRouter.post('/:id/test', async (req: AuthRequest, res: Response) => {
     }
 
     // Update node status
-    await pool.query(
-      'UPDATE server_nodes SET status = $1, last_check = now() WHERE id = $2',
+    await pool.execute(
+      'UPDATE server_nodes SET status = ?, last_check = NOW() WHERE id = ?',
       [status, node.id]
     );
 
@@ -175,21 +203,24 @@ nodesRouter.post('/:id/test', async (req: AuthRequest, res: Response) => {
 // Register agent and get install script
 nodesRouter.post('/:id/register-agent', async (req: AuthRequest, res: Response) => {
   try {
-    const nodeResult = await pool.query(
-      'SELECT * FROM server_nodes WHERE id = $1 AND (user_id = $2 OR $3 = true)',
-      [req.params.id, req.userId, req.userRole === 'admin']
+    const isAdmin = req.userRole === 'admin';
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      isAdmin 
+        ? 'SELECT * FROM server_nodes WHERE id = ?'
+        : 'SELECT * FROM server_nodes WHERE id = ? AND user_id = ?',
+      isAdmin ? [req.params.id] : [req.params.id, req.userId]
     );
 
-    if (nodeResult.rows.length === 0) {
+    if (rows.length === 0) {
       return res.status(404).json({ error: 'Node nicht gefunden' });
     }
 
-    const node = nodeResult.rows[0];
+    const node = rows[0];
     const agentToken = uuidv4();
 
     // Update node with agent token
-    await pool.query(
-      'UPDATE server_nodes SET agent_token = $1 WHERE id = $2',
+    await pool.execute(
+      'UPDATE server_nodes SET agent_token = ? WHERE id = ?',
       [agentToken, node.id]
     );
 
