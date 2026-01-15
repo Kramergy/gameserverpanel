@@ -127,31 +127,42 @@ export default function ServerDetails() {
   });
 
   const handleStart = async () => {
+    if (!id) return;
     toast.info("Server wird gestartet...");
-    await updateStatus.mutateAsync("starting");
-    setTimeout(async () => {
-      await updateStatus.mutateAsync("online");
-      setConsoleLogs(prev => [...prev, "[INFO] Server gestartet"]);
+    try {
+      const { error } = await api.startServer(id);
+      if (error) throw new Error(error);
+      queryClient.invalidateQueries({ queryKey: ["server-instance", id] });
       toast.success("Server gestartet!");
-    }, 2000);
+    } catch (error: any) {
+      toast.error("Startfehler: " + error.message);
+    }
   };
 
   const handleStop = async () => {
+    if (!id) return;
     toast.info("Server wird gestoppt...");
-    await updateStatus.mutateAsync("offline");
-    setConsoleLogs(prev => [...prev, "[INFO] Server gestoppt"]);
-    toast.success("Server gestoppt");
+    try {
+      const { error } = await api.stopServer(id);
+      if (error) throw new Error(error);
+      queryClient.invalidateQueries({ queryKey: ["server-instance", id] });
+      toast.success("Server gestoppt");
+    } catch (error: any) {
+      toast.error("Stoppfehler: " + error.message);
+    }
   };
 
   const handleRestart = async () => {
+    if (!id) return;
     toast.info("Server wird neu gestartet...");
-    await updateStatus.mutateAsync("starting");
-    setConsoleLogs(prev => [...prev, "[INFO] Server wird neu gestartet..."]);
-    setTimeout(async () => {
-      await updateStatus.mutateAsync("online");
-      setConsoleLogs(prev => [...prev, "[INFO] Server neu gestartet"]);
+    try {
+      const { error } = await api.restartServer(id);
+      if (error) throw new Error(error);
+      queryClient.invalidateQueries({ queryKey: ["server-instance", id] });
       toast.success("Server neu gestartet!");
-    }, 3000);
+    } catch (error: any) {
+      toast.error("Neustartfehler: " + error.message);
+    }
   };
 
   const handleSaveConfig = () => {
@@ -199,21 +210,27 @@ export default function ServerDetails() {
     );
   }
 
-  const statusClasses = {
+  const statusClasses: Record<string, string> = {
     online: "status-online",
     offline: "status-offline",
     starting: "status-starting",
+    stopping: "status-starting",
+    restarting: "status-starting",
     installing: "status-starting",
+    error: "bg-destructive/10 text-destructive",
   };
 
-  const statusLabels = {
+  const statusLabels: Record<string, string> = {
     online: "Online",
     offline: "Offline",
     starting: "Startet...",
+    stopping: "Stoppt...",
+    restarting: "Neustart...",
     installing: "Installiert...",
+    error: "Fehler",
   };
 
-  const isLoaderStatus = server.status === "starting" || server.status === "installing";
+  const isLoaderStatus = server.status === "starting" || server.status === "installing" || server.status === "stopping" || server.status === "restarting";
 
   return (
     <div className="min-h-screen bg-background">
