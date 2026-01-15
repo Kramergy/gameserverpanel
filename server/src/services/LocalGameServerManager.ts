@@ -38,7 +38,7 @@ const GAME_CONFIGS: Record<string, GameConfig> = {
     id: 'palworld',
     name: 'Palworld',
     executable: 'PalServer.exe',
-    stopCommand: null,
+    stopCommand: undefined,
     installType: 'steamcmd',
     steamAppId: '2394010',
   },
