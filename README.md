@@ -39,7 +39,7 @@ cd YOUR-REPO
 # Script ausführen
 .\scripts\install-windows.ps1
 
-Uninstall-Script erstellt! Es entfernt PM2 Prozesse, Docker Container, Datenbank/Benutzer, Firewall-Regeln und Dateien - mit Bestätigungen für jeden Schritt.
+Uninstall-Script! Es entfernt PM2 Prozesse, Docker Container, Datenbank/Benutzer, Firewall-Regeln und Dateien - mit Bestätigungen für jeden Schritt.
 
 # Interaktiv (mit Bestätigungen)
 .\scripts\uninstall-windows.ps1
