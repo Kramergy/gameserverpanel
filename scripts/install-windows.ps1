@@ -268,33 +268,33 @@ function Get-ExistingMySQLConfig {
     Write-Host "========================================" -ForegroundColor Yellow
     Write-Host ""
     
-    $host = Read-Host "MySQL Host [$MySQLHost]"
-    if ([string]::IsNullOrEmpty($host)) { $host = $MySQLHost }
+    $dbHost = Read-Host "MySQL Host [$MySQLHost]"
+    if ([string]::IsNullOrEmpty($dbHost)) { $dbHost = $MySQLHost }
     
     $portStr = Read-Host "MySQL Port [$MySQLPort]"
-    if ([string]::IsNullOrEmpty($portStr)) { $port = $MySQLPort } else { $port = [int]$portStr }
+    if ([string]::IsNullOrEmpty($portStr)) { $dbPort = $MySQLPort } else { $dbPort = [int]$portStr }
     
-    $user = Read-Host "MySQL Benutzer [$MySQLUser]"
-    if ([string]::IsNullOrEmpty($user)) { $user = $MySQLUser }
+    $dbUser = Read-Host "MySQL Benutzer [$MySQLUser]"
+    if ([string]::IsNullOrEmpty($dbUser)) { $dbUser = $MySQLUser }
     
     $password = Read-Host "MySQL Passwort" -AsSecureString
-    $passwordPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($password))
-    if ([string]::IsNullOrEmpty($passwordPlain)) { $passwordPlain = $DbPassword }
+    $dbPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($password))
+    if ([string]::IsNullOrEmpty($dbPassword)) { $dbPassword = $DbPassword }
     
-    $database = Read-Host "MySQL Datenbank [$MySQLDatabase]"
-    if ([string]::IsNullOrEmpty($database)) { $database = $MySQLDatabase }
+    $dbName = Read-Host "MySQL Datenbank [$MySQLDatabase]"
+    if ([string]::IsNullOrEmpty($dbName)) { $dbName = $MySQLDatabase }
     
     Write-Host ""
-    Write-Info "Teste Verbindung zu $host`:$port..."
+    Write-Info "Teste Verbindung zu ${dbHost}:${dbPort}..."
     
-    if (Test-MySQLConnection -Host $host -Port $port -User $user -Password $passwordPlain -Database $database) {
+    if (Test-MySQLConnection -Host $dbHost -Port $dbPort -User $dbUser -Password $dbPassword -Database $dbName) {
         Write-Success "Verbindung erfolgreich!"
         return @{
-            Host = $host
-            Port = $port
-            User = $user
-            Password = $passwordPlain
-            Database = $database
+            Host = $dbHost
+            Port = $dbPort
+            User = $dbUser
+            Password = $dbPassword
+            Database = $dbName
         }
     } else {
         Write-Warning "Verbindung fehlgeschlagen. Bitte prüfe die Zugangsdaten."
