@@ -89,17 +89,17 @@ function Test-MySQLConnection {
     
     $mysqlPath = Get-MySQLPath
     if (-not $mysqlPath) {
-        Write-Warning "MySQL Client (mysql.exe) nicht gefunden!"
-        Write-Warning "Bitte installiere MySQL Server oder MySQL Workbench."
-        Write-Host ""
-        Write-Host "Bekannte Pfade die geprueft wurden:" -ForegroundColor Yellow
-        Write-Host "  - C:\Program Files\MySQL\MySQL Server 8.x\bin\mysql.exe"
-        Write-Host "  - C:\mysql\bin\mysql.exe"
-        Write-Host "  - mysql.exe im PATH"
-        return $false
+        $result = Request-MySQLPath
+        if ($result -eq "skip") {
+            return "skip"
+        } elseif ($result -eq $true) {
+            $mysqlPath = Get-MySQLPath
+        } else {
+            return $false
+        }
     }
     
-    Write-Host "  MySQL Client gefunden: $mysqlPath" -ForegroundColor Gray
+    Write-Host "  MySQL Client: $mysqlPath" -ForegroundColor Gray
     
     try {
         $env:MYSQL_PWD = $Password
@@ -123,13 +123,37 @@ function Test-MySQLConnection {
 }
 
 function Get-MySQLPath {
-    # Suche MySQL Client
+    # Globale Variable für manuell gesetzten Pfad
+    if ($script:ManualMySQLPath -and (Test-Path $script:ManualMySQLPath)) {
+        return $script:ManualMySQLPath
+    }
+    
+    # Suche MySQL Client in vielen möglichen Pfaden
     $paths = @(
+        # MySQL Server verschiedene Versionen
         "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe",
         "C:\Program Files\MySQL\MySQL Server 8.1\bin\mysql.exe",
         "C:\Program Files\MySQL\MySQL Server 8.2\bin\mysql.exe",
         "C:\Program Files\MySQL\MySQL Server 8.3\bin\mysql.exe",
         "C:\Program Files\MySQL\MySQL Server 8.4\bin\mysql.exe",
+        "C:\Program Files\MySQL\MySQL Server 5.7\bin\mysql.exe",
+        "C:\Program Files (x86)\MySQL\MySQL Server 8.0\bin\mysql.exe",
+        "C:\Program Files (x86)\MySQL\MySQL Server 5.7\bin\mysql.exe",
+        # MySQL Workbench
+        "C:\Program Files\MySQL\MySQL Workbench 8.0 CE\mysql.exe",
+        # MariaDB (MySQL-kompatibel)
+        "C:\Program Files\MariaDB 10.11\bin\mysql.exe",
+        "C:\Program Files\MariaDB 10.6\bin\mysql.exe",
+        "C:\Program Files\MariaDB 11.0\bin\mysql.exe",
+        "C:\Program Files\MariaDB\bin\mysql.exe",
+        # XAMPP
+        "C:\xampp\mysql\bin\mysql.exe",
+        # WAMP
+        "C:\wamp64\bin\mysql\mysql8.0.31\bin\mysql.exe",
+        "C:\wamp\bin\mysql\mysql5.7.36\bin\mysql.exe",
+        # Laragon
+        "C:\laragon\bin\mysql\mysql-8.0.30-winx64\bin\mysql.exe",
+        # Portable
         "C:\mysql\bin\mysql.exe"
     )
     
@@ -139,10 +163,64 @@ function Get-MySQLPath {
         }
     }
     
+    # Wildcard-Suche in Program Files
+    $wildcardPaths = @(
+        "C:\Program Files\MySQL\MySQL Server *\bin\mysql.exe",
+        "C:\Program Files\MariaDB*\bin\mysql.exe",
+        "C:\xampp\mysql\bin\mysql.exe",
+        "C:\wamp64\bin\mysql\*\bin\mysql.exe",
+        "C:\laragon\bin\mysql\*\bin\mysql.exe"
+    )
+    
+    foreach ($pattern in $wildcardPaths) {
+        $found = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) {
+            return $found.FullName
+        }
+    }
+    
     # Versuche über PATH
     $mysqlCmd = Get-Command "mysql.exe" -ErrorAction SilentlyContinue
     if ($mysqlCmd) {
         return $mysqlCmd.Source
+    }
+    
+    return $null
+}
+
+function Request-MySQLPath {
+    Write-Host ""
+    Write-Warning "MySQL Client (mysql.exe) nicht gefunden!"
+    Write-Host ""
+    Write-Host "Optionen:" -ForegroundColor Yellow
+    Write-Host "  1. Pfad zu mysql.exe manuell eingeben"
+    Write-Host "  2. MySQL ohne Client-Test fortsetzen (nur .env erstellen)"
+    Write-Host "  3. Abbrechen"
+    Write-Host ""
+    
+    $choice = Read-Host "Auswahl [1-3]"
+    
+    switch ($choice) {
+        "1" {
+            $manualPath = Read-Host "Vollstaendiger Pfad zu mysql.exe"
+            if (Test-Path $manualPath) {
+                $script:ManualMySQLPath = $manualPath
+                Write-Success "MySQL Client gefunden: $manualPath"
+                return $true
+            } else {
+                Write-Error "Datei nicht gefunden: $manualPath"
+                return $false
+            }
+        }
+        "2" {
+            Write-Warning "Fahre ohne MySQL-Test fort..."
+            return "skip"
+        }
+        default {
+            return $false
+        }
+    }
+}
     }
     
     return $null
