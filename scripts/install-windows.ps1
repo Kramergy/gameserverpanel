@@ -89,19 +89,31 @@ function Test-MySQLConnection {
     
     $mysqlPath = Get-MySQLPath
     if (-not $mysqlPath) {
+        Write-Warning "MySQL Client (mysql.exe) nicht gefunden!"
+        Write-Warning "Bitte installiere MySQL Server oder MySQL Workbench."
+        Write-Host ""
+        Write-Host "Bekannte Pfade die geprueft wurden:" -ForegroundColor Yellow
+        Write-Host "  - C:\Program Files\MySQL\MySQL Server 8.x\bin\mysql.exe"
+        Write-Host "  - C:\mysql\bin\mysql.exe"
+        Write-Host "  - mysql.exe im PATH"
         return $false
     }
+    
+    Write-Host "  MySQL Client gefunden: $mysqlPath" -ForegroundColor Gray
     
     try {
         $env:MYSQL_PWD = $Password
         # Erst ohne Datenbank testen (falls DB noch nicht existiert)
-        $result = & $mysqlPath -h $Server -P $Port -u $User -e "SELECT 1;" 2>&1
+        Write-Host "  Verbinde zu ${Server}:${Port} als ${User}..." -ForegroundColor Gray
+        $result = & $mysqlPath -h $Server -P $Port -u $User --connect-timeout=5 -e "SELECT 1;" 2>&1
+        $exitCode = $LASTEXITCODE
         $env:MYSQL_PWD = ""
         
-        if ($LASTEXITCODE -eq 0) {
+        if ($exitCode -eq 0) {
             return $true
         } else {
-            Write-Warning "MySQL Fehler: $result"
+            Write-Warning "MySQL Fehler (Exit Code: $exitCode):"
+            Write-Host $result -ForegroundColor Red
         }
     } catch {
         Write-Warning "Exception: $_"
