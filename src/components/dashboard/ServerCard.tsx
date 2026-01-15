@@ -18,7 +18,7 @@ export interface ServerInstance {
   name: string;
   game: string;
   game_icon: string;
-  status: "online" | "offline" | "starting" | "installing" | "installed" | "error";
+  status: "online" | "offline" | "starting" | "stopping" | "restarting" | "installing" | "error";
   current_players: number;
   max_players: number;
   cpu_usage: number;
@@ -29,14 +29,7 @@ export interface ServerInstance {
   created_at: string;
   updated_at: string;
   user_id: string;
-  node_id: string | null;
   install_path: string | null;
-  node?: {
-    id: string;
-    name: string;
-    host: string;
-    status: string;
-  } | null;
 }
 
 interface ServerCardProps {
@@ -56,8 +49,9 @@ export function ServerCard({ server, onSelect, onStart, onStop, onRestart, onDel
     online: "status-online",
     offline: "status-offline",
     starting: "status-starting",
+    stopping: "status-starting",
+    restarting: "status-starting",
     installing: "status-starting",
-    installed: "status-online",
     error: "bg-destructive/10 text-destructive",
   };
 
@@ -65,13 +59,14 @@ export function ServerCard({ server, onSelect, onStart, onStop, onRestart, onDel
     online: "Online",
     offline: "Offline",
     starting: "Startet...",
+    stopping: "Stoppt...",
+    restarting: "Neustart...",
     installing: "Installiert...",
-    installed: "Bereit",
     error: "Fehler",
   };
 
-  const isLoading = server.status === "starting" || server.status === "installing";
-  const canStart = server.status === "offline" || server.status === "installed";
+  const isLoading = server.status === "starting" || server.status === "installing" || server.status === "stopping" || server.status === "restarting";
+  const canStart = server.status === "offline";
 
   const handleAction = (e: React.MouseEvent, action: () => void) => {
     e.stopPropagation();
@@ -112,15 +107,10 @@ export function ServerCard({ server, onSelect, onStart, onStop, onRestart, onDel
             <span className="text-muted-foreground">Connect: </span>
             <span className="text-foreground">{server.ip}:{server.port}</span>
           </div>
-          {server.node && (
+          {server.install_path && (
             <div className="flex items-center gap-1.5 mt-2 text-xs text-muted-foreground">
               <Server className="w-3 h-3" />
-              <span>Läuft auf:</span>
-              <span className="font-medium text-foreground">{server.node.name}</span>
-              <span className={cn(
-                "ml-1 w-1.5 h-1.5 rounded-full",
-                server.node.status === "online" ? "bg-success" : "bg-destructive"
-              )} />
+              <span className="font-mono truncate">{server.install_path}</span>
             </div>
           )}
         </div>
