@@ -94,13 +94,18 @@ function Test-MySQLConnection {
     
     try {
         $env:MYSQL_PWD = $Password
-        $result = & $mysqlPath -h $Server -P $Port -u $User -e "SELECT 1;" $Database 2>&1
+        # Erst ohne Datenbank testen (falls DB noch nicht existiert)
+        $result = & $mysqlPath -h $Server -P $Port -u $User -e "SELECT 1;" 2>&1
         $env:MYSQL_PWD = ""
         
         if ($LASTEXITCODE -eq 0) {
             return $true
+        } else {
+            Write-Warning "MySQL Fehler: $result"
         }
-    } catch {}
+    } catch {
+        Write-Warning "Exception: $_"
+    }
     
     return $false
 }
