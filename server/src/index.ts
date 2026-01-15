@@ -50,8 +50,8 @@ async function start() {
     await initDatabase();
     console.log('Database initialized');
     
-    app.listen(PORT, () => {
-      console.log(`GamePanel Backend running on port ${PORT}`);
+    app.listen(Number(PORT), '0.0.0.0', () => {
+      console.log(`GamePanel Backend running on 0.0.0.0:${PORT}`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);
