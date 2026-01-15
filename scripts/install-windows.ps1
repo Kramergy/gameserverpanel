@@ -221,10 +221,6 @@ function Request-MySQLPath {
         }
     }
 }
-    }
-    
-    return $null
-}
 
 function Wait-ForMySQLService {
     param([int]$TimeoutSeconds = 60)
