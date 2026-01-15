@@ -10,8 +10,8 @@
     Pfad wo GamePanel installiert ist (Standard: C:\GamePanel)
 .PARAMETER KeepDatabase
     Datenbank nicht löschen
-.PARAMETER KeepPostgres
-    PostgreSQL nicht deinstallieren
+.PARAMETER KeepMySQL
+    MySQL nicht deinstallieren
 .PARAMETER Force
     Keine Bestätigungen abfragen
 .EXAMPLE
@@ -23,7 +23,7 @@
 param(
     [string]$InstallPath = "C:\GamePanel",
     [switch]$KeepDatabase,
-    [switch]$KeepPostgres,
+    [switch]$KeepMySQL,
     [switch]$Force
 )
 
@@ -75,6 +75,30 @@ function Confirm-Action {
     return ($response -eq "j" -or $response -eq "J" -or $response -eq "y" -or $response -eq "Y")
 }
 
+function Get-MySQLPath {
+    $paths = @(
+        "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe",
+        "C:\Program Files\MySQL\MySQL Server 8.1\bin\mysql.exe",
+        "C:\Program Files\MySQL\MySQL Server 8.2\bin\mysql.exe",
+        "C:\Program Files\MySQL\MySQL Server 8.3\bin\mysql.exe",
+        "C:\Program Files\MySQL\MySQL Server 8.4\bin\mysql.exe",
+        "C:\mysql\bin\mysql.exe"
+    )
+    
+    foreach ($path in $paths) {
+        if (Test-Path $path) {
+            return $path
+        }
+    }
+    
+    $mysqlCmd = Get-Command "mysql.exe" -ErrorAction SilentlyContinue
+    if ($mysqlCmd) {
+        return $mysqlCmd.Source
+    }
+    
+    return $null
+}
+
 # ============================================
 # Hauptlogik
 # ============================================
@@ -84,11 +108,12 @@ Write-Host @"
 
    ____                      ____                  _ 
   / ___| __ _ _ __ ___   ___|  _ \ __ _ _ __   ___| |
- | |  _ / _` | '_ ` _ \ / _ \ |_) / _` | '_ \ / _ \ |
+ | |  _ / _`| '_ ` _ \ / _ \ |_) / _` | '_ \ / _ \ |
  | |_| | (_| | | | | | |  __/  __/ (_| | | | |  __/ |
   \____|\__,_|_| |_| |_|\___|_|   \__,_|_| |_|\___|_|
                                                      
-         Windows UNINSTALL Script v1.0
+         Windows UNINSTALL Script v2.0
+              (MySQL Edition)
 
 "@ -ForegroundColor Red
 
@@ -197,82 +222,75 @@ if (Test-Command "docker") {
 Write-Step "Schritt 3: Datenbank entfernen"
 
 if (-not $KeepDatabase) {
-    $psqlPath = Get-ChildItem -Path "C:\Program Files\PostgreSQL" -Recurse -Filter "psql.exe" -ErrorAction SilentlyContinue | 
-                Select-Object -First 1 | 
-                Select-Object -ExpandProperty FullName
+    $mysqlPath = Get-MySQLPath
     
-    if ($psqlPath) {
-        $pgService = Get-Service -Name "postgresql*" -ErrorAction SilentlyContinue
+    if ($mysqlPath) {
+        $mysqlService = Get-Service -Name "MySQL*" -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq "Running" }
         
-        if ($pgService -and $pgService.Status -eq "Running") {
-            Write-Info "PostgreSQL läuft, entferne Datenbank..."
+        if ($mysqlService) {
+            Write-Info "MySQL läuft, entferne Datenbank..."
             
-            $env:PGPASSWORD = "postgres"
+            $rootPw = Read-Host "MySQL Root Passwort eingeben (oder leer lassen zum Überspringen)" -AsSecureString
+            $rootPwPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($rootPw))
             
-            # Verbindungen trennen
-            & $psqlPath -U postgres -h localhost -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'gamepanel';" 2>$null
-            
-            # Datenbank löschen
-            $result = & $psqlPath -U postgres -h localhost -c "DROP DATABASE IF EXISTS gamepanel;" 2>&1
-            if ($LASTEXITCODE -eq 0) {
-                Write-Success "Datenbank 'gamepanel' gelöscht"
+            if (-not [string]::IsNullOrEmpty($rootPwPlain)) {
+                $env:MYSQL_PWD = $rootPwPlain
+                
+                # Datenbank löschen
+                $result = & $mysqlPath -u root -e "DROP DATABASE IF EXISTS gamepanel;" 2>&1
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Success "Datenbank 'gamepanel' gelöscht"
+                } else {
+                    Write-Warning "Datenbank konnte nicht gelöscht werden: $result"
+                }
+                
+                # Benutzer löschen
+                $result = & $mysqlPath -u root -e "DROP USER IF EXISTS 'gamepanel'@'localhost'; DROP USER IF EXISTS 'gamepanel'@'%';" 2>&1
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Success "Benutzer 'gamepanel' gelöscht"
+                } else {
+                    Write-Warning "Benutzer konnte nicht gelöscht werden: $result"
+                }
+                
+                $env:MYSQL_PWD = ""
             } else {
-                Write-Warning "Datenbank konnte nicht gelöscht werden: $result"
+                Write-Info "MySQL Root Passwort nicht angegeben, überspringe Datenbank-Löschung"
             }
-            
-            # Benutzer löschen
-            $result = & $psqlPath -U postgres -h localhost -c "DROP USER IF EXISTS gamepanel;" 2>&1
-            if ($LASTEXITCODE -eq 0) {
-                Write-Success "Benutzer 'gamepanel' gelöscht"
-            } else {
-                Write-Warning "Benutzer konnte nicht gelöscht werden: $result"
-            }
-            
-            $env:PGPASSWORD = ""
         } else {
-            Write-Warning "PostgreSQL läuft nicht - Datenbank kann nicht gelöscht werden"
-            Write-Info "Starte PostgreSQL manuell und führe aus:"
+            Write-Warning "MySQL läuft nicht - Datenbank kann nicht gelöscht werden"
+            Write-Info "Starte MySQL manuell und führe aus:"
             Write-Info "  DROP DATABASE gamepanel;"
-            Write-Info "  DROP USER gamepanel;"
+            Write-Info "  DROP USER 'gamepanel'@'localhost';"
         }
     } else {
-        Write-Info "PostgreSQL nicht gefunden"
+        Write-Info "MySQL Client nicht gefunden"
     }
     
-    # PostgreSQL komplett deinstallieren?
-    if (-not $KeepPostgres) {
-        if (Confirm-Action "PostgreSQL komplett deinstallieren?") {
-            Write-Info "Deinstalliere PostgreSQL..."
+    # MySQL komplett deinstallieren?
+    if (-not $KeepMySQL) {
+        if (Confirm-Action "MySQL komplett deinstallieren?") {
+            Write-Info "Deinstalliere MySQL..."
             
             # Service stoppen
-            $pgService = Get-Service -Name "postgresql*" -ErrorAction SilentlyContinue
-            if ($pgService) {
-                Stop-Service $pgService.Name -Force -ErrorAction SilentlyContinue
-                Write-Success "PostgreSQL Service gestoppt"
+            $mysqlService = Get-Service -Name "MySQL*" -ErrorAction SilentlyContinue
+            if ($mysqlService) {
+                Stop-Service $mysqlService.Name -Force -ErrorAction SilentlyContinue
+                Write-Success "MySQL Service gestoppt"
             }
             
-            # Uninstaller suchen und ausführen
-            $uninstaller = Get-ChildItem -Path "C:\Program Files\PostgreSQL" -Recurse -Filter "uninstall-postgresql.exe" -ErrorAction SilentlyContinue | 
-                           Select-Object -First 1
+            # Über winget deinstallieren
+            winget uninstall Oracle.MySQL --silent 2>$null
             
-            if ($uninstaller) {
-                Write-Info "Starte PostgreSQL Uninstaller..."
-                Start-Process -FilePath $uninstaller.FullName -ArgumentList "--mode", "unattended" -Wait
-                Write-Success "PostgreSQL deinstalliert"
-            } else {
-                Write-Warning "PostgreSQL Uninstaller nicht gefunden"
-                Write-Info "Deinstalliere manuell über 'Programme und Features'"
-            }
-            
-            # Datenverzeichnis löschen
-            $pgDataDirs = @(
-                "C:\Program Files\PostgreSQL",
-                "$env:APPDATA\postgresql"
+            # MySQL Verzeichnisse
+            $mysqlDirs = @(
+                "C:\Program Files\MySQL",
+                "C:\ProgramData\MySQL",
+                "$env:APPDATA\MySQL"
             )
             
-            foreach ($dir in $pgDataDirs) {
+            foreach ($dir in $mysqlDirs) {
                 if (Test-Path $dir) {
-                    if (Confirm-Action "PostgreSQL Verzeichnis löschen: $dir ?") {
+                    if (Confirm-Action "MySQL Verzeichnis löschen: $dir ?") {
                         Remove-Item -Path $dir -Recurse -Force -ErrorAction SilentlyContinue
                         Write-Success "Verzeichnis gelöscht: $dir"
                     }
@@ -292,7 +310,8 @@ Write-Step "Schritt 4: Firewall-Regeln entfernen"
 
 $firewallRules = @(
     "GamePanel Backend",
-    "GamePanel Frontend"
+    "GamePanel Frontend",
+    "GamePanel"
 )
 
 foreach ($ruleName in $firewallRules) {
@@ -371,15 +390,15 @@ if (Test-Command "npm") {
 
 Write-Step "Schritt 7: Umgebungsvariablen bereinigen"
 
-# PATH bereinigen (PostgreSQL Pfad entfernen falls PostgreSQL deinstalliert)
-if (-not $KeepPostgres) {
+# PATH bereinigen (MySQL Pfad entfernen falls MySQL deinstalliert)
+if (-not $KeepMySQL) {
     $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
-    $pgPathPattern = "C:\\Program Files\\PostgreSQL\\[0-9]+\\bin;?"
+    $mysqlPathPattern = "C:\\Program Files\\MySQL\\MySQL Server [0-9.]+\\bin;?"
     
-    if ($machinePath -match $pgPathPattern) {
-        $newPath = $machinePath -replace $pgPathPattern, ""
+    if ($machinePath -match $mysqlPathPattern) {
+        $newPath = $machinePath -replace $mysqlPathPattern, ""
         [System.Environment]::SetEnvironmentVariable("Path", $newPath, "Machine")
-        Write-Success "PostgreSQL aus PATH entfernt"
+        Write-Success "MySQL aus PATH entfernt"
     }
 }
 
@@ -399,8 +418,8 @@ if ($KeepDatabase) {
     $remainingItems += "Datenbank 'gamepanel' (--KeepDatabase)"
 }
 
-if ($KeepPostgres) {
-    $remainingItems += "PostgreSQL (--KeepPostgres)"
+if ($KeepMySQL) {
+    $remainingItems += "MySQL (--KeepMySQL)"
 }
 
 if (Test-Path $InstallPath) {

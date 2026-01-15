@@ -3,7 +3,7 @@
 .SYNOPSIS
     GamePanel Windows Installation Script
 .DESCRIPTION
-    Automatische Installation des GamePanels auf Windows Server/Desktop
+    Automatische Installation des GamePanels auf Windows Server/Desktop mit MySQL
 .NOTES
     Muss als Administrator ausgeführt werden!
 #>
@@ -14,10 +14,15 @@ param(
     [int]$BackendPort = 3001,
     [int]$FrontendPort = 3000,
     [string]$DbPassword = "gamepanel",
-    [switch]$SkipPostgres,
+    [switch]$SkipMySQL,
     [switch]$SkipNodeJS,
     [switch]$SkipFirewall,
-    [switch]$UseDocker
+    [switch]$UseDocker,
+    [switch]$UseExistingMySQL,
+    [string]$MySQLHost = "localhost",
+    [int]$MySQLPort = 3306,
+    [string]$MySQLUser = "gamepanel",
+    [string]$MySQLDatabase = "gamepanel"
 )
 
 # ============================================
@@ -70,6 +75,238 @@ function Generate-RandomString {
 }
 
 # ============================================
+# MySQL Hilfsfunktionen
+# ============================================
+
+function Test-MySQLConnection {
+    param(
+        [string]$Host,
+        [int]$Port,
+        [string]$User,
+        [string]$Password,
+        [string]$Database
+    )
+    
+    $mysqlPath = Get-MySQLPath
+    if (-not $mysqlPath) {
+        return $false
+    }
+    
+    try {
+        $env:MYSQL_PWD = $Password
+        $result = & $mysqlPath -h $Host -P $Port -u $User -e "SELECT 1;" $Database 2>&1
+        $env:MYSQL_PWD = ""
+        
+        if ($LASTEXITCODE -eq 0) {
+            return $true
+        }
+    } catch {}
+    
+    return $false
+}
+
+function Get-MySQLPath {
+    # Suche MySQL Client
+    $paths = @(
+        "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe",
+        "C:\Program Files\MySQL\MySQL Server 8.1\bin\mysql.exe",
+        "C:\Program Files\MySQL\MySQL Server 8.2\bin\mysql.exe",
+        "C:\Program Files\MySQL\MySQL Server 8.3\bin\mysql.exe",
+        "C:\Program Files\MySQL\MySQL Server 8.4\bin\mysql.exe",
+        "C:\mysql\bin\mysql.exe"
+    )
+    
+    foreach ($path in $paths) {
+        if (Test-Path $path) {
+            return $path
+        }
+    }
+    
+    # Versuche über PATH
+    $mysqlCmd = Get-Command "mysql.exe" -ErrorAction SilentlyContinue
+    if ($mysqlCmd) {
+        return $mysqlCmd.Source
+    }
+    
+    return $null
+}
+
+function Wait-ForMySQLService {
+    param([int]$TimeoutSeconds = 60)
+    
+    $elapsed = 0
+    while ($elapsed -lt $TimeoutSeconds) {
+        $service = Get-Service -Name "MySQL*" -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq "Running" }
+        if ($service) {
+            return $true
+        }
+        Start-Sleep -Seconds 2
+        $elapsed += 2
+        Write-Host "." -NoNewline -ForegroundColor Gray
+    }
+    Write-Host ""
+    return $false
+}
+
+function Install-MySQL {
+    param([string]$RootPassword = "rootpassword")
+    
+    Write-Info "Lade MySQL Community Server herunter..."
+    
+    $mysqlInstallerUrl = "https://dev.mysql.com/get/Downloads/MySQLInstaller/mysql-installer-community-8.0.36.0.msi"
+    $mysqlInstallerPath = "$env:TEMP\mysql-installer.msi"
+    
+    try {
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri $mysqlInstallerUrl -OutFile $mysqlInstallerPath -UseBasicParsing
+        $ProgressPreference = 'Continue'
+        Write-Success "Download abgeschlossen"
+    } catch {
+        Write-Warning "Automatischer Download fehlgeschlagen"
+        Write-Host ""
+        Write-Host "Bitte lade MySQL manuell herunter:" -ForegroundColor Yellow
+        Write-Host "  https://dev.mysql.com/downloads/mysql/" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "Nach der Installation führe dieses Script erneut aus mit:" -ForegroundColor Gray
+        Write-Host "  .\install-windows.ps1 -UseExistingMySQL" -ForegroundColor Cyan
+        return $false
+    }
+    
+    Write-Info "Installiere MySQL (dies kann einige Minuten dauern)..."
+    
+    try {
+        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i", $mysqlInstallerPath, "/quiet", "/norestart" -Wait -NoNewWindow
+        
+        # Warte auf Service
+        Write-Info "Warte auf MySQL Service"
+        if (Wait-ForMySQLService -TimeoutSeconds 120) {
+            Write-Success "MySQL Service läuft"
+            
+            # MySQL bin zum PATH hinzufügen
+            $mysqlBinPath = "C:\Program Files\MySQL\MySQL Server 8.0\bin"
+            if (Test-Path $mysqlBinPath) {
+                $env:Path = "$mysqlBinPath;$env:Path"
+                [System.Environment]::SetEnvironmentVariable("Path", "$mysqlBinPath;" + [System.Environment]::GetEnvironmentVariable("Path", "Machine"), "Machine")
+                Write-Success "MySQL zum PATH hinzugefügt"
+            }
+            
+            return $true
+        } else {
+            Write-Warning "MySQL Service konnte nicht gefunden werden"
+            return $false
+        }
+    } catch {
+        Write-Error "Installation fehlgeschlagen: $_"
+        return $false
+    } finally {
+        Remove-Item $mysqlInstallerPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Setup-GamePanelDatabase {
+    param(
+        [string]$Host = "localhost",
+        [int]$Port = 3306,
+        [string]$RootUser = "root",
+        [string]$RootPassword = "",
+        [string]$DbUser = "gamepanel",
+        [string]$DbPassword = "gamepanel",
+        [string]$DbName = "gamepanel"
+    )
+    
+    $mysqlPath = Get-MySQLPath
+    if (-not $mysqlPath) {
+        Write-Error "MySQL Client nicht gefunden"
+        return $false
+    }
+    
+    Write-Info "Richte GamePanel Datenbank ein..."
+    $env:MYSQL_PWD = $RootPassword
+    
+    # Datenbank erstellen
+    $createDbSql = "CREATE DATABASE IF NOT EXISTS $DbName;"
+    $result = & $mysqlPath -h $Host -P $Port -u $RootUser -e $createDbSql 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "Datenbank '$DbName' erstellt"
+    } else {
+        Write-Warning "Datenbank konnte nicht erstellt werden: $result"
+    }
+    
+    # Benutzer erstellen
+    $createUserSql = "CREATE USER IF NOT EXISTS '$DbUser'@'%' IDENTIFIED BY '$DbPassword';"
+    $result = & $mysqlPath -h $Host -P $Port -u $RootUser -e $createUserSql 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "Benutzer '$DbUser' erstellt"
+    } else {
+        Write-Warning "Benutzer konnte nicht erstellt werden: $result"
+    }
+    
+    # Berechtigungen setzen
+    $grantSql = "GRANT ALL PRIVILEGES ON $DbName.* TO '$DbUser'@'%'; FLUSH PRIVILEGES;"
+    $result = & $mysqlPath -h $Host -P $Port -u $RootUser -e $grantSql 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "Berechtigungen für '$DbUser' gesetzt"
+    }
+    
+    $env:MYSQL_PWD = ""
+    
+    # Verbindung testen
+    Write-Info "Teste Datenbankverbindung..."
+    if (Test-MySQLConnection -Host $Host -Port $Port -User $DbUser -Password $DbPassword -Database $DbName) {
+        Write-Success "Datenbankverbindung erfolgreich"
+        return $true
+    } else {
+        Write-Warning "Datenbankverbindung fehlgeschlagen"
+        return $false
+    }
+}
+
+function Get-ExistingMySQLConfig {
+    Write-Host ""
+    Write-Host "========================================" -ForegroundColor Yellow
+    Write-Host " MySQL Verbindungsdaten eingeben" -ForegroundColor Yellow
+    Write-Host "========================================" -ForegroundColor Yellow
+    Write-Host ""
+    
+    $host = Read-Host "MySQL Host [$MySQLHost]"
+    if ([string]::IsNullOrEmpty($host)) { $host = $MySQLHost }
+    
+    $portStr = Read-Host "MySQL Port [$MySQLPort]"
+    if ([string]::IsNullOrEmpty($portStr)) { $port = $MySQLPort } else { $port = [int]$portStr }
+    
+    $user = Read-Host "MySQL Benutzer [$MySQLUser]"
+    if ([string]::IsNullOrEmpty($user)) { $user = $MySQLUser }
+    
+    $password = Read-Host "MySQL Passwort" -AsSecureString
+    $passwordPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($password))
+    if ([string]::IsNullOrEmpty($passwordPlain)) { $passwordPlain = $DbPassword }
+    
+    $database = Read-Host "MySQL Datenbank [$MySQLDatabase]"
+    if ([string]::IsNullOrEmpty($database)) { $database = $MySQLDatabase }
+    
+    Write-Host ""
+    Write-Info "Teste Verbindung zu $host`:$port..."
+    
+    if (Test-MySQLConnection -Host $host -Port $port -User $user -Password $passwordPlain -Database $database) {
+        Write-Success "Verbindung erfolgreich!"
+        return @{
+            Host = $host
+            Port = $port
+            User = $user
+            Password = $passwordPlain
+            Database = $database
+        }
+    } else {
+        Write-Warning "Verbindung fehlgeschlagen. Bitte prüfe die Zugangsdaten."
+        $retry = Read-Host "Erneut versuchen? (j/n)"
+        if ($retry -eq "j") {
+            return Get-ExistingMySQLConfig
+        }
+        return $null
+    }
+}
+
+# ============================================
 # Hauptlogik
 # ============================================
 
@@ -78,11 +315,12 @@ Write-Host @"
 
    ____                      ____                  _ 
   / ___| __ _ _ __ ___   ___|  _ \ __ _ _ __   ___| |
- | |  _ / _` | '_ ` _ \ / _ \ |_) / _` | '_ \ / _ \ |
+ | |  _ / _`| '_ ` _ \ / _ \ |_) / _` | '_ \ / _ \ |
  | |_| | (_| | | | | | |  __/  __/ (_| | | | |  __/ |
   \____|\__,_|_| |_| |_|\___|_|   \__,_|_| |_|\___|_|
                                                      
-         Windows Installation Script v1.0
+         Windows Installation Script v2.0
+              (MySQL Edition)
 
 "@ -ForegroundColor Magenta
 
@@ -132,6 +370,8 @@ if ($UseDocker) {
     $jwtSecret = Generate-RandomString -Length 64
     $envContent = @"
 JWT_SECRET=$jwtSecret
+DB_PASSWORD=$DbPassword
+MYSQL_ROOT_PASSWORD=rootpassword
 CORS_ORIGINS=http://localhost:$FrontendPort
 BACKEND_URL=http://localhost:$BackendPort
 "@
@@ -212,285 +452,166 @@ if (-not $SkipNodeJS) {
 }
 
 # ============================================
-# Schritt 4: PostgreSQL installieren
+# Schritt 4: MySQL konfigurieren
 # ============================================
 
-Write-Step "Schritt 4: PostgreSQL installieren"
+Write-Step "Schritt 4: MySQL Datenbank konfigurieren"
 
-function Wait-ForService {
-    param(
-        [string]$ServicePattern,
-        [int]$TimeoutSeconds = 60
-    )
-    
-    $elapsed = 0
-    while ($elapsed -lt $TimeoutSeconds) {
-        $service = Get-Service -Name $ServicePattern -ErrorAction SilentlyContinue
-        if ($service -and $service.Status -eq "Running") {
-            return $service
-        }
-        Start-Sleep -Seconds 2
-        $elapsed += 2
-        Write-Host "." -NoNewline -ForegroundColor Gray
-    }
-    Write-Host ""
-    return $null
-}
+$dbConfig = $null
 
-function Wait-ForPostgresConnection {
-    param(
-        [string]$PsqlPath,
-        [int]$TimeoutSeconds = 30
-    )
+if (-not $SkipMySQL) {
+    # Prüfen ob MySQL bereits installiert ist
+    $mysqlService = Get-Service -Name "MySQL*" -ErrorAction SilentlyContinue
+    $mysqlPath = Get-MySQLPath
     
-    $elapsed = 0
-    while ($elapsed -lt $TimeoutSeconds) {
-        try {
-            $env:PGPASSWORD = "postgres"
-            $result = & $PsqlPath -U postgres -h localhost -c "SELECT 1;" 2>$null
-            $env:PGPASSWORD = ""
-            if ($LASTEXITCODE -eq 0) {
-                return $true
-            }
-        } catch {}
-        Start-Sleep -Seconds 2
-        $elapsed += 2
-        Write-Host "." -NoNewline -ForegroundColor Gray
-    }
-    Write-Host ""
-    return $false
-}
-
-function Install-PostgreSQL {
-    param(
-        [string]$DbPassword
-    )
-    
-    $pgVersion = "16"
-    $pgInstallerUrl = "https://get.enterprisedb.com/postgresql/postgresql-16.4-1-windows-x64.exe"
-    $pgInstallerPath = "$env:TEMP\postgresql-installer.exe"
-    $pgInstallDir = "C:\Program Files\PostgreSQL\$pgVersion"
-    $pgDataDir = "C:\Program Files\PostgreSQL\$pgVersion\data"
-    $pgSuperPassword = "postgres"
-    
-    Write-Info "Lade PostgreSQL $pgVersion herunter..."
-    
-    try {
-        # Download mit Progress
-        $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -Uri $pgInstallerUrl -OutFile $pgInstallerPath -UseBasicParsing
-        $ProgressPreference = 'Continue'
-        Write-Success "Download abgeschlossen"
-    } catch {
-        Write-Error "Download fehlgeschlagen: $_"
-        return $false
-    }
-    
-    Write-Info "Installiere PostgreSQL (dies kann einige Minuten dauern)..."
-    Write-Info "  Installationsverzeichnis: $pgInstallDir"
-    Write-Info "  Datenverzeichnis: $pgDataDir"
-    Write-Info "  Superuser Passwort: $pgSuperPassword"
-    Write-Host ""
-    
-    # Silent Installation mit Parametern
-    $installArgs = @(
-        "--mode", "unattended",
-        "--unattendedmodeui", "minimal",
-        "--prefix", $pgInstallDir,
-        "--datadir", $pgDataDir,
-        "--superpassword", $pgSuperPassword,
-        "--serverport", "5432",
-        "--servicename", "postgresql-x64-$pgVersion",
-        "--serviceaccount", "NT AUTHORITY\NetworkService",
-        "--install_runtimes", "0"
-    )
-    
-    try {
-        $process = Start-Process -FilePath $pgInstallerPath -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
-        
-        if ($process.ExitCode -ne 0) {
-            Write-Warning "Installer Exit Code: $($process.ExitCode)"
-        }
-    } catch {
-        Write-Error "Installation fehlgeschlagen: $_"
-        return $false
-    }
-    
-    # Installer aufräumen
-    Remove-Item $pgInstallerPath -Force -ErrorAction SilentlyContinue
-    
-    # Warten auf Service
-    Write-Info "Warte auf PostgreSQL Service"
-    $service = Wait-ForService -ServicePattern "postgresql*" -TimeoutSeconds 60
-    
-    if ($service) {
-        Write-Success "PostgreSQL Service läuft: $($service.Name)"
-        
-        # PostgreSQL bin zum PATH hinzufügen
-        $pgBinPath = "$pgInstallDir\bin"
-        if (Test-Path $pgBinPath) {
-            $env:Path = "$pgBinPath;$env:Path"
-            [System.Environment]::SetEnvironmentVariable("Path", "$pgBinPath;" + [System.Environment]::GetEnvironmentVariable("Path", "Machine"), "Machine")
-            Write-Success "PostgreSQL zum PATH hinzugefügt"
-        }
-        
-        return $true
-    } else {
-        Write-Error "PostgreSQL Service konnte nicht gestartet werden"
-        return $false
-    }
-}
-
-function Setup-GamePanelDatabase {
-    param(
-        [string]$DbPassword
-    )
-    
-    # psql finden
-    $psqlPath = Get-ChildItem -Path "C:\Program Files\PostgreSQL" -Recurse -Filter "psql.exe" -ErrorAction SilentlyContinue | 
-                Select-Object -First 1 | 
-                Select-Object -ExpandProperty FullName
-    
-    if (-not $psqlPath) {
-        Write-Error "psql.exe nicht gefunden"
-        return $false
-    }
-    
-    Write-Info "Warte auf PostgreSQL Verbindung"
-    if (-not (Wait-ForPostgresConnection -PsqlPath $psqlPath -TimeoutSeconds 30)) {
-        Write-Error "Konnte keine Verbindung zu PostgreSQL herstellen"
-        Write-Info "Bitte prüfe ob der PostgreSQL Service läuft:"
-        Write-Info "  Get-Service postgresql* | Start-Service"
-        return $false
-    }
-    Write-Success "PostgreSQL ist erreichbar"
-    
-    Write-Info "Richte GamePanel Datenbank ein..."
-    $env:PGPASSWORD = "postgres"
-    
-    # Benutzer erstellen
-    $userExists = & $psqlPath -U postgres -h localhost -tAc "SELECT 1 FROM pg_roles WHERE rolname='gamepanel'" 2>$null
-    
-    if ($userExists.Trim() -ne "1") {
-        $result = & $psqlPath -U postgres -h localhost -c "CREATE USER gamepanel WITH PASSWORD '$DbPassword' CREATEDB;" 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "Benutzer 'gamepanel' erstellt (Passwort: $DbPassword)"
-        } else {
-            Write-Warning "Benutzer konnte nicht erstellt werden: $result"
-        }
-    } else {
-        Write-Info "Benutzer 'gamepanel' existiert bereits"
-    }
-    
-    # Datenbank erstellen
-    $dbExists = & $psqlPath -U postgres -h localhost -tAc "SELECT 1 FROM pg_database WHERE datname='gamepanel'" 2>$null
-    
-    if ($dbExists.Trim() -ne "1") {
-        $result = & $psqlPath -U postgres -h localhost -c "CREATE DATABASE gamepanel OWNER gamepanel;" 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "Datenbank 'gamepanel' erstellt"
-        } else {
-            Write-Warning "Datenbank konnte nicht erstellt werden: $result"
-        }
-    } else {
-        Write-Info "Datenbank 'gamepanel' existiert bereits"
-    }
-    
-    # Berechtigungen setzen
-    & $psqlPath -U postgres -h localhost -c "GRANT ALL PRIVILEGES ON DATABASE gamepanel TO gamepanel;" 2>$null
-    
-    $env:PGPASSWORD = ""
-    
-    # Verbindung testen
-    Write-Info "Teste Datenbankverbindung..."
-    $env:PGPASSWORD = $DbPassword
-    $testResult = & $psqlPath -U gamepanel -h localhost -d gamepanel -c "SELECT 'Connection OK';" 2>&1
-    $env:PGPASSWORD = ""
-    
-    if ($LASTEXITCODE -eq 0) {
-        Write-Success "Datenbankverbindung erfolgreich getestet"
-        return $true
-    } else {
-        Write-Warning "Datenbankverbindung fehlgeschlagen: $testResult"
-        return $false
-    }
-}
-
-if (-not $SkipPostgres) {
-    # Prüfen ob PostgreSQL bereits installiert ist
-    $pgService = Get-Service -Name "postgresql*" -ErrorAction SilentlyContinue
-    $psqlExists = Get-ChildItem -Path "C:\Program Files\PostgreSQL" -Recurse -Filter "psql.exe" -ErrorAction SilentlyContinue
-    
-    if (-not $pgService -and -not $psqlExists) {
-        Write-Info "PostgreSQL ist nicht installiert"
-        Write-Host ""
-        Write-Host "PostgreSQL Konfiguration:" -ForegroundColor Yellow
-        Write-Host "  Superuser:     postgres" -ForegroundColor Gray
-        Write-Host "  Superpasswort: postgres" -ForegroundColor Gray
-        Write-Host "  GamePanel DB:  gamepanel" -ForegroundColor Gray
-        Write-Host "  GamePanel User: gamepanel" -ForegroundColor Gray
-        Write-Host "  GamePanel Pass: $DbPassword" -ForegroundColor Gray
-        Write-Host ""
-        
-        $installPg = Read-Host "PostgreSQL jetzt automatisch installieren? (j/n)"
-        
-        if ($installPg -eq "j") {
-            if (-not (Install-PostgreSQL -DbPassword $DbPassword)) {
-                Write-Error "PostgreSQL Installation fehlgeschlagen"
-                Write-Host ""
-                Write-Host "Manuelle Installation:" -ForegroundColor Yellow
-                Write-Host "  1. Lade PostgreSQL herunter: https://www.postgresql.org/download/windows/" -ForegroundColor Gray
-                Write-Host "  2. Installiere mit Standardeinstellungen" -ForegroundColor Gray
-                Write-Host "  3. Setze Superuser Passwort auf: postgres" -ForegroundColor Gray
-                Write-Host "  4. Führe dieses Script erneut aus" -ForegroundColor Gray
-                Write-Host ""
+    if ($UseExistingMySQL -or $mysqlService -or $mysqlPath) {
+        # Existierender MySQL Server
+        if ($UseExistingMySQL) {
+            Write-Info "Verwende existierenden MySQL Server..."
+            $dbConfig = Get-ExistingMySQLConfig
+            
+            if (-not $dbConfig) {
+                Write-Error "MySQL Konfiguration fehlgeschlagen"
                 exit 1
             }
         } else {
+            Write-Success "MySQL ist bereits installiert"
+            
             Write-Host ""
-            Write-Host "Manuelle PostgreSQL Installation:" -ForegroundColor Yellow
-            Write-Host "=================================" -ForegroundColor Yellow
+            Write-Host "MySQL Optionen:" -ForegroundColor Yellow
+            Write-Host "  [1] GamePanel Datenbank auf lokalem MySQL erstellen" -ForegroundColor Gray
+            Write-Host "  [2] Existierenden MySQL Server/Datenbank verwenden" -ForegroundColor Gray
+            Write-Host "  [3] MySQL überspringen (manuell konfigurieren)" -ForegroundColor Gray
             Write-Host ""
-            Write-Host "1. Download:" -ForegroundColor White
-            Write-Host "   https://www.postgresql.org/download/windows/" -ForegroundColor Cyan
-            Write-Host ""
-            Write-Host "2. Installation:" -ForegroundColor White
-            Write-Host "   - Installationsverzeichnis: C:\Program Files\PostgreSQL\16" -ForegroundColor Gray
-            Write-Host "   - Komponenten: PostgreSQL Server, Command Line Tools" -ForegroundColor Gray
-            Write-Host "   - Datenverzeichnis: Standard belassen" -ForegroundColor Gray
-            Write-Host "   - Superuser Passwort: postgres" -ForegroundColor Yellow
-            Write-Host "   - Port: 5432 (Standard)" -ForegroundColor Gray
-            Write-Host "   - Locale: German, Germany oder Default" -ForegroundColor Gray
-            Write-Host ""
-            Write-Host "3. Nach der Installation:" -ForegroundColor White
-            Write-Host "   Führe dieses Script erneut aus:" -ForegroundColor Gray
-            Write-Host "   .\scripts\install-windows.ps1" -ForegroundColor Cyan
-            Write-Host ""
-            exit 0
+            
+            $choice = Read-Host "Auswahl (1-3)"
+            
+            switch ($choice) {
+                "1" {
+                    $rootPw = Read-Host "MySQL Root Passwort eingeben" -AsSecureString
+                    $rootPwPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($rootPw))
+                    
+                    Setup-GamePanelDatabase -RootPassword $rootPwPlain -DbPassword $DbPassword
+                    
+                    $dbConfig = @{
+                        Host = "localhost"
+                        Port = 3306
+                        User = "gamepanel"
+                        Password = $DbPassword
+                        Database = "gamepanel"
+                    }
+                }
+                "2" {
+                    $dbConfig = Get-ExistingMySQLConfig
+                    if (-not $dbConfig) {
+                        Write-Error "MySQL Konfiguration fehlgeschlagen"
+                        exit 1
+                    }
+                }
+                "3" {
+                    Write-Info "MySQL wird übersprungen"
+                    $dbConfig = @{
+                        Host = "localhost"
+                        Port = 3306
+                        User = "gamepanel"
+                        Password = $DbPassword
+                        Database = "gamepanel"
+                    }
+                }
+                default {
+                    $dbConfig = @{
+                        Host = "localhost"
+                        Port = 3306
+                        User = "gamepanel"
+                        Password = $DbPassword
+                        Database = "gamepanel"
+                    }
+                }
+            }
         }
     } else {
-        # PostgreSQL existiert, prüfen ob es läuft
-        if ($pgService) {
-            if ($pgService.Status -ne "Running") {
-                Write-Info "Starte PostgreSQL Dienst..."
-                try {
-                    Start-Service $pgService.Name -ErrorAction Stop
-                    Start-Sleep -Seconds 3
-                    Write-Success "PostgreSQL Dienst gestartet"
-                } catch {
-                    Write-Error "Konnte PostgreSQL nicht starten: $_"
-                    Write-Info "Versuche manuell: Start-Service $($pgService.Name)"
+        # MySQL nicht installiert - Optionen anzeigen
+        Write-Info "MySQL ist nicht installiert"
+        Write-Host ""
+        Write-Host "========================================" -ForegroundColor Yellow
+        Write-Host " MySQL Datenbank-Konfiguration" -ForegroundColor Yellow
+        Write-Host "========================================" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Bitte wähle eine Option:" -ForegroundColor White
+        Write-Host "  [1] Neuen MySQL Server installieren (empfohlen für lokale Installation)" -ForegroundColor Gray
+        Write-Host "  [2] Existierenden MySQL Server verwenden (Remote oder bereits installiert)" -ForegroundColor Gray
+        Write-Host "  [3] MySQL überspringen (später manuell konfigurieren)" -ForegroundColor Gray
+        Write-Host ""
+        
+        $choice = Read-Host "Auswahl (1-3)"
+        
+        switch ($choice) {
+            "1" {
+                Write-Host ""
+                Write-Host "MySQL wird installiert mit:" -ForegroundColor Yellow
+                Write-Host "  Datenbank:  gamepanel" -ForegroundColor Gray
+                Write-Host "  Benutzer:   gamepanel" -ForegroundColor Gray
+                Write-Host "  Passwort:   $DbPassword" -ForegroundColor Gray
+                Write-Host ""
+                
+                if (Install-MySQL) {
+                    Start-Sleep -Seconds 5
+                    Setup-GamePanelDatabase -DbPassword $DbPassword
+                    
+                    $dbConfig = @{
+                        Host = "localhost"
+                        Port = 3306
+                        User = "gamepanel"
+                        Password = $DbPassword
+                        Database = "gamepanel"
+                    }
+                } else {
+                    Write-Warning "MySQL Installation fehlgeschlagen"
+                    Write-Host ""
+                    Write-Host "Manuelle Installation:" -ForegroundColor Yellow
+                    Write-Host "  1. Lade MySQL herunter: https://dev.mysql.com/downloads/mysql/" -ForegroundColor Gray
+                    Write-Host "  2. Installiere MySQL Community Server" -ForegroundColor Gray
+                    Write-Host "  3. Führe dieses Script erneut aus mit: -UseExistingMySQL" -ForegroundColor Gray
                     exit 1
                 }
-            } else {
-                Write-Success "PostgreSQL läuft bereits: $($pgService.Name)"
+            }
+            "2" {
+                $dbConfig = Get-ExistingMySQLConfig
+                if (-not $dbConfig) {
+                    Write-Error "MySQL Konfiguration fehlgeschlagen"
+                    exit 1
+                }
+            }
+            "3" {
+                Write-Info "MySQL wird übersprungen"
+                Write-Warning "Du musst die .env Datei später manuell konfigurieren!"
+                $dbConfig = @{
+                    Host = "localhost"
+                    Port = 3306
+                    User = "gamepanel"
+                    Password = $DbPassword
+                    Database = "gamepanel"
+                }
+            }
+            default {
+                Write-Warning "Ungültige Auswahl, verwende Standard-Konfiguration"
+                $dbConfig = @{
+                    Host = "localhost"
+                    Port = 3306
+                    User = "gamepanel"
+                    Password = $DbPassword
+                    Database = "gamepanel"
+                }
             }
         }
     }
-    
-    # Datenbank einrichten
-    if (-not (Setup-GamePanelDatabase -DbPassword $DbPassword)) {
-        Write-Warning "Datenbank-Setup hatte Probleme, aber wir fahren fort..."
+} else {
+    $dbConfig = @{
+        Host = $MySQLHost
+        Port = $MySQLPort
+        User = $MySQLUser
+        Password = $DbPassword
+        Database = $MySQLDatabase
     }
 }
 
@@ -535,12 +656,19 @@ Set-Location "$InstallPath\server"
 Write-Info "Installiere Backend Dependencies..."
 npm install 2>&1 | Out-Null
 
-# .env erstellen
+# .env erstellen mit MySQL Konfiguration
 $jwtSecret = Generate-RandomString -Length 64
 $envContent = @"
 PORT=$BackendPort
 NODE_ENV=production
-DATABASE_URL=postgresql://gamepanel:$DbPassword@localhost:5432/gamepanel
+
+# MySQL Datenbank Konfiguration
+DB_HOST=$($dbConfig.Host)
+DB_PORT=$($dbConfig.Port)
+DB_USER=$($dbConfig.User)
+DB_PASSWORD=$($dbConfig.Password)
+DB_NAME=$($dbConfig.Database)
+
 JWT_SECRET=$jwtSecret
 CORS_ORIGINS=http://localhost:$FrontendPort,http://127.0.0.1:$FrontendPort
 BACKEND_URL=http://localhost:$BackendPort
@@ -703,6 +831,9 @@ Write-Host "  Frontend: " -NoNewline -ForegroundColor Gray
 Write-Host "http://localhost:$FrontendPort" -ForegroundColor Cyan
 Write-Host "  Backend:  " -NoNewline -ForegroundColor Gray
 Write-Host "http://localhost:$BackendPort" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  MySQL:    " -NoNewline -ForegroundColor Gray
+Write-Host "$($dbConfig.Host):$($dbConfig.Port)/$($dbConfig.Database)" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "  Installation: " -NoNewline -ForegroundColor Gray
 Write-Host "$InstallPath" -ForegroundColor Yellow
