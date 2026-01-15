@@ -1,17 +1,16 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ServerNodesSettings } from "./ServerNodesSettings";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Server, Settings, Bell, Shield } from "lucide-react";
+import { Settings, Bell, Shield, FolderOpen } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 export function SettingsPage() {
-  const [defaultGamePath, setDefaultGamePath] = useState("/home/gameserver/servers");
-  const [backupPath, setBackupPath] = useState("/home/gameserver/backups");
+  const [gameserverPath, setGameserverPath] = useState("C:\\GamePanel\\Gameservers");
+  const [backupPath, setBackupPath] = useState("C:\\GamePanel\\Backups");
   const [autoStart, setAutoStart] = useState(true);
   const [emailNotifications, setEmailNotifications] = useState(true);
 
@@ -26,14 +25,14 @@ export function SettingsPage() {
         <p className="text-muted-foreground mt-1">Panel und Server Konfiguration</p>
       </div>
 
-      <Tabs defaultValue="nodes" className="space-y-4">
+      <Tabs defaultValue="general" className="space-y-4">
         <TabsList>
-          <TabsTrigger value="nodes" className="flex items-center gap-2">
-            <Server className="h-4 w-4" />
-            Server-Nodes
+          <TabsTrigger value="general" className="flex items-center gap-2">
+            <Settings className="h-4 w-4" />
+            Allgemein
           </TabsTrigger>
           <TabsTrigger value="paths" className="flex items-center gap-2">
-            <Settings className="h-4 w-4" />
+            <FolderOpen className="h-4 w-4" />
             Pfade
           </TabsTrigger>
           <TabsTrigger value="notifications" className="flex items-center gap-2">
@@ -46,8 +45,28 @@ export function SettingsPage() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="nodes">
-          <ServerNodesSettings />
+        <TabsContent value="general">
+          <Card>
+            <CardHeader>
+              <CardTitle>Allgemeine Einstellungen</CardTitle>
+              <CardDescription>
+                Grundlegende Panel-Konfiguration
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label>Auto-Start bei Systemstart</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Server automatisch starten wenn das Panel startet
+                  </p>
+                </div>
+                <Switch checked={autoStart} onCheckedChange={setAutoStart} />
+              </div>
+
+              <Button onClick={handleSaveGeneral}>Speichern</Button>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="paths">
@@ -55,20 +74,20 @@ export function SettingsPage() {
             <CardHeader>
               <CardTitle>Pfad-Einstellungen</CardTitle>
               <CardDescription>
-                Standard-Pfade für Gameserver-Installationen und Backups
+                Lokale Pfade für Gameserver-Installationen und Backups
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="defaultGamePath">Standard Installationspfad</Label>
+                <Label htmlFor="gameserverPath">Gameserver Installationspfad</Label>
                 <Input
-                  id="defaultGamePath"
-                  value={defaultGamePath}
-                  onChange={(e) => setDefaultGamePath(e.target.value)}
-                  placeholder="/home/gameserver/servers"
+                  id="gameserverPath"
+                  value={gameserverPath}
+                  onChange={(e) => setGameserverPath(e.target.value)}
+                  placeholder="C:\GamePanel\Gameservers"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Dieser Pfad wird als Standard verwendet, wenn kein Node-spezifischer Pfad angegeben ist
+                  Hier werden alle Gameserver installiert
                 </p>
               </div>
 
@@ -78,21 +97,11 @@ export function SettingsPage() {
                   id="backupPath"
                   value={backupPath}
                   onChange={(e) => setBackupPath(e.target.value)}
-                  placeholder="/home/gameserver/backups"
+                  placeholder="C:\GamePanel\Backups"
                 />
                 <p className="text-xs text-muted-foreground">
                   Pfad für automatische Server-Backups
                 </p>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Auto-Start bei Neustart</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Server automatisch starten wenn der Node neu startet
-                  </p>
-                </div>
-                <Switch checked={autoStart} onCheckedChange={setAutoStart} />
               </div>
 
               <Button onClick={handleSaveGeneral}>Speichern</Button>
@@ -129,16 +138,6 @@ export function SettingsPage() {
                 <Switch defaultChecked />
               </div>
 
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Hohe Ressourcenauslastung</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Warnung bei CPU/RAM über 90%
-                  </p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-
               <Button onClick={handleSaveGeneral}>Speichern</Button>
             </CardContent>
           </Card>
@@ -161,16 +160,6 @@ export function SettingsPage() {
                   </p>
                 </div>
                 <Button variant="outline" size="sm">Einrichten</Button>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>API-Zugang</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Verwalte API-Keys für externe Integrationen
-                  </p>
-                </div>
-                <Button variant="outline" size="sm">Verwalten</Button>
               </div>
 
               <div className="flex items-center justify-between">

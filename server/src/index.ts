@@ -2,10 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { authRouter } from './routes/auth';
-import { nodesRouter } from './routes/nodes';
 import { serversRouter } from './routes/servers';
-import { commandsRouter } from './routes/commands';
-import { agentRouter } from './routes/agent';
 import { logsRouter } from './routes/logs';
 import { initDatabase } from './db/init';
 
@@ -32,10 +29,7 @@ app.get('/health', (req, res) => {
 
 // API Routes
 app.use('/api/auth', authRouter);
-app.use('/api/nodes', nodesRouter);
 app.use('/api/servers', serversRouter);
-app.use('/api/commands', commandsRouter);
-app.use('/api/agent', agentRouter);
 app.use('/api/logs', logsRouter);
 
 // Error handling middleware
@@ -52,6 +46,7 @@ async function start() {
     
     app.listen(Number(PORT), '0.0.0.0', () => {
       console.log(`GamePanel Backend running on 0.0.0.0:${PORT}`);
+      console.log(`Gameserver path: ${process.env.GAMESERVER_PATH || 'C:\\GamePanel\\Gameservers'}`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);

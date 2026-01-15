@@ -11,9 +11,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GameSelector, GameOption } from "./GameSelector";
 import { useServerInstances } from "@/hooks/useServerInstances";
-import { useGameServerInstall } from "@/hooks/useGameServerInstall";
-import { useServerNodes } from "@/hooks/useServerNodes";
-import { Loader2, Server, ArrowLeft, AlertCircle } from "lucide-react";
+import { api } from "@/lib/api";
+import { Loader2, Server, ArrowLeft } from "lucide-react";
+import { toast } from "sonner";
 
 interface CreateServerDialogProps {
   open: boolean;
@@ -21,25 +21,15 @@ interface CreateServerDialogProps {
 }
 
 function CreateServerDialogContent({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
-  const [step, setStep] = useState<"node" | "game" | "config">("node");
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [step, setStep] = useState<"game" | "config">("game");
   const [selectedGame, setSelectedGame] = useState<GameOption | null>(null);
   const [serverName, setServerName] = useState("");
   const [port, setPort] = useState(25565);
   const [maxPlayers, setMaxPlayers] = useState(20);
   const [ram, setRam] = useState(2048);
+  const [isCreating, setIsCreating] = useState(false);
 
   const { createServer } = useServerInstances();
-  const { installServer } = useGameServerInstall();
-  const { nodes, isLoading: nodesLoading } = useServerNodes();
-
-  // Filter only online nodes
-  const availableNodes = nodes.filter(n => n.status === "online");
-
-  const handleNodeSelect = (nodeId: string) => {
-    setSelectedNodeId(nodeId);
-    setStep("game");
-  };
 
   const handleGameSelect = (game: GameOption) => {
     setSelectedGame(game);
@@ -52,54 +42,48 @@ function CreateServerDialogContent({ onOpenChange }: { onOpenChange: (open: bool
   const handleBack = () => {
     if (step === "config") {
       setStep("game");
-    } else if (step === "game") {
-      setStep("node");
     }
   };
 
   const handleCreate = async () => {
-    if (!selectedGame || !selectedNodeId) return;
+    if (!selectedGame) return;
 
-    // Create server instance in database
-    const server = await createServer.mutateAsync({
-      name: serverName,
-      game: selectedGame.id,
-      game_icon: selectedGame.icon,
-      port,
-      max_players: maxPlayers,
-      ram_allocated: ram,
-      node_id: selectedNodeId,
-    });
+    setIsCreating(true);
 
-    // Trigger installation on the agent
-    if (server?.id) {
-      await installServer.mutateAsync({
-        serverId: server.id,
-        nodeId: selectedNodeId,
-        game: selectedGame,
-        serverName,
+    try {
+      // Create server instance in database
+      const server = await createServer.mutateAsync({
+        name: serverName,
+        game: selectedGame.id,
+        game_icon: selectedGame.icon,
         port,
-        maxPlayers,
-        ram,
+        max_players: maxPlayers,
+        ram_allocated: ram,
       });
+
+      // Trigger installation
+      if (server?.id) {
+        await api.installServer(server.id);
+        toast.success("Installation gestartet!");
+      }
+
+      // Reset and close
+      setStep("game");
+      setSelectedGame(null);
+      setServerName("");
+      onOpenChange(false);
+    } catch (error: any) {
+      toast.error("Fehler: " + error.message);
+    } finally {
+      setIsCreating(false);
     }
-
-    // Reset and close
-    setStep("node");
-    setSelectedNodeId(null);
-    setSelectedGame(null);
-    setServerName("");
-    onOpenChange(false);
   };
-
-  const selectedNode = nodes.find(n => n.id === selectedNodeId);
-  const isCreating = createServer.isPending || installServer.isPending;
 
   return (
     <>
       <DialogHeader>
         <DialogTitle className="flex items-center gap-2">
-          {step !== "node" && (
+          {step !== "game" && (
             <Button
               variant="ghost"
               size="icon"
@@ -110,76 +94,22 @@ function CreateServerDialogContent({ onOpenChange }: { onOpenChange: (open: bool
             </Button>
           )}
           <Server className="h-5 w-5" />
-          {step === "node" ? "Server-Node auswählen" : step === "game" ? "Spiel auswählen" : "Server konfigurieren"}
+          {step === "game" ? "Spiel auswählen" : "Server konfigurieren"}
         </DialogTitle>
         <DialogDescription>
-          {step === "node"
-            ? "Wähle den Server, auf dem das Spiel installiert werden soll"
-            : step === "game"
+          {step === "game"
             ? "Wähle das Spiel für deinen neuen Gameserver"
             : `Konfiguriere deinen ${selectedGame?.name} Server`}
         </DialogDescription>
       </DialogHeader>
 
-      {step === "node" ? (
-        <div className="space-y-4">
-          {nodesLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : availableNodes.length === 0 ? (
-            <div className="text-center py-8 border border-dashed border-border rounded-lg">
-              <AlertCircle className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
-              <h3 className="font-medium">Keine Server-Nodes verfügbar</h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                {nodes.length === 0 
-                  ? "Füge zuerst einen Server-Node in den Einstellungen hinzu."
-                  : "Keiner deiner Server-Nodes ist online. Starte einen Agent."}
-              </p>
-            </div>
-          ) : (
-            <div className="grid gap-3">
-              {availableNodes.map((node) => (
-                <button
-                  key={node.id}
-                  onClick={() => handleNodeSelect(node.id)}
-                  className="flex items-center gap-4 p-4 rounded-lg border border-border hover:border-primary/50 hover:bg-secondary/30 transition-all text-left"
-                >
-                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                    {node.os_type === "windows" ? "🪟" : "🐧"}
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-medium">{node.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {node.host} • {node.os_type === "windows" ? "Windows" : "Linux"}
-                    </p>
-                  </div>
-                  <div className="px-2 py-1 rounded-full text-xs bg-success/10 text-success">
-                    Online
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      ) : step === "game" ? (
+      {step === "game" ? (
         <GameSelector
           selectedGame={selectedGame?.id ?? null}
           onSelect={handleGameSelect}
         />
       ) : (
         <div className="space-y-4">
-          {/* Selected Node Info */}
-          {selectedNode && (
-            <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg border border-border">
-              <span className="text-xl">{selectedNode.os_type === "windows" ? "🪟" : "🐧"}</span>
-              <div className="flex-1">
-                <p className="text-sm font-medium">{selectedNode.name}</p>
-                <p className="text-xs text-muted-foreground">{selectedNode.host}</p>
-              </div>
-            </div>
-          )}
-
           <div className="flex items-center gap-3 p-3 bg-secondary/50 rounded-lg">
             <span className="text-2xl">{selectedGame?.icon}</span>
             <div>
@@ -188,6 +118,12 @@ function CreateServerDialogContent({ onOpenChange }: { onOpenChange: (open: bool
                 {selectedGame?.description}
               </p>
             </div>
+          </div>
+
+          <div className="p-3 bg-muted/50 rounded-lg border border-border">
+            <p className="text-sm text-muted-foreground">
+              📂 Installationspfad: <span className="font-mono text-foreground">C:\GamePanel\Gameservers\</span>
+            </p>
           </div>
 
           <div className="grid gap-4">
