@@ -10,7 +10,7 @@
 
 param(
     [string]$InstallPath = "C:\GamePanel",
-    [string]$RepoUrl = "https://github.com/DEIN-USERNAME/gamepanel.git",
+    [string]$RepoUrl = "https://github.com/Kramergy/gameserverpanel.git",
     [int]$BackendPort = 3001,
     [int]$FrontendPort = 3000,
     [string]$DbPassword = "gamepanel",
