@@ -11,6 +11,7 @@ import ServerDetails from "./pages/ServerDetails";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
+// Force rebuild: 2026-01-15
 
 const App = () => {
   return (
