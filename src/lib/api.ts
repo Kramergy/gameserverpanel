@@ -1,6 +1,6 @@
 // Self-hosted API client for the Node.js backend
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://footwear-chips-television-festivals.trycloudflare.com';
+const API_URL = import.meta.env.VITE_API_URL || 'https://parker-lobby-ecology-invention.trycloudflare.com';
 
 interface ApiResponse<T = any> {
   data?: T;
