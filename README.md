@@ -26,6 +26,23 @@ npm i
 npm run dev
 ```
 
+
+Windows Install
+
+```sh
+Repository klonen (empfohlen)
+
+# Repository klonen
+git clone https://github.com/Kramergy/gameserverpanel.git
+cd YOUR-REPO
+
+# Script ausführen
+.\scripts\install-windows.ps1
+```
+
+
+
+
 **Edit a file directly in GitHub**
 
 - Navigate to the desired file(s).
