@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { pool } from '../db/pool';
+import { RowDataPacket } from 'mysql2';
 
 export interface AuthRequest extends Request {
   userId?: string;
@@ -26,12 +27,12 @@ export async function authMiddleware(req: AuthRequest, res: Response, next: Next
     req.userId = decoded.userId;
 
     // Fetch user role
-    const result = await pool.query(
-      'SELECT role FROM user_roles WHERE user_id = $1',
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      'SELECT role FROM user_roles WHERE user_id = ?',
       [decoded.userId]
     );
 
-    req.userRole = result.rows[0]?.role || 'user';
+    req.userRole = rows[0]?.role || 'user';
 
     next();
   } catch (error) {

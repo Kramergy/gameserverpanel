@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { pool } from '../db/pool';
+import { RowDataPacket, ResultSetHeader } from 'mysql2';
 
 export const agentRouter = Router();
 
@@ -12,15 +13,14 @@ agentRouter.post('/heartbeat', async (req: Request, res: Response) => {
   }
 
   try {
-    const result = await pool.query(
+    const [result] = await pool.execute<ResultSetHeader>(
       `UPDATE server_nodes 
-       SET last_check = now(), status = 'online', agent_connected_at = COALESCE(agent_connected_at, now())
-       WHERE id = $1 AND agent_token = $2
-       RETURNING id`,
+       SET last_check = NOW(), status = 'online', agent_connected_at = COALESCE(agent_connected_at, NOW())
+       WHERE id = ? AND agent_token = ?`,
       [nodeId, agentToken]
     );
 
-    if (result.rows.length === 0) {
+    if (result.affectedRows === 0) {
       return res.status(401).json({ error: 'Ungültiger Node oder Token' });
     }
 
@@ -41,41 +41,41 @@ agentRouter.post('/poll-commands', async (req: Request, res: Response) => {
 
   try {
     // Verify agent
-    const nodeResult = await pool.query(
-      'SELECT * FROM server_nodes WHERE id = $1 AND agent_token = $2',
+    const [nodes] = await pool.execute<RowDataPacket[]>(
+      'SELECT * FROM server_nodes WHERE id = ? AND agent_token = ?',
       [nodeId, agentToken]
     );
 
-    if (nodeResult.rows.length === 0) {
+    if (nodes.length === 0) {
       return res.status(401).json({ error: 'Ungültiger Node oder Token' });
     }
 
-    const node = nodeResult.rows[0];
+    const node = nodes[0];
 
     // Update last check
-    await pool.query(
-      'UPDATE server_nodes SET last_check = now(), status = $1 WHERE id = $2',
+    await pool.execute(
+      'UPDATE server_nodes SET last_check = NOW(), status = ? WHERE id = ?',
       ['online', nodeId]
     );
 
     // Get pending commands
-    const commandsResult = await pool.query(
+    const [commands] = await pool.execute<RowDataPacket[]>(
       `SELECT * FROM node_commands 
-       WHERE node_id = $1 AND status = 'pending'
+       WHERE node_id = ? AND status = 'pending'
        ORDER BY created_at ASC`,
       [nodeId]
     );
 
     // Get game paths for servers on this node
-    const serversResult = await pool.query(
-      `SELECT id, game, install_path FROM server_instances WHERE node_id = $1`,
+    const [servers] = await pool.execute<RowDataPacket[]>(
+      `SELECT id, game, install_path FROM server_instances WHERE node_id = ?`,
       [nodeId]
     );
 
     res.json({
-      commands: commandsResult.rows,
+      commands,
       gamePath: node.game_path,
-      servers: serversResult.rows
+      servers
     });
   } catch (error) {
     console.error('Poll commands error:', error);
@@ -93,29 +93,29 @@ agentRouter.post('/command-result', async (req: Request, res: Response) => {
 
   try {
     // Verify agent owns this command's node
-    const commandResult = await pool.query(
+    const [commands] = await pool.execute<RowDataPacket[]>(
       `SELECT nc.*, sn.agent_token 
        FROM node_commands nc
        JOIN server_nodes sn ON nc.node_id = sn.id
-       WHERE nc.id = $1`,
+       WHERE nc.id = ?`,
       [commandId]
     );
 
-    if (commandResult.rows.length === 0) {
+    if (commands.length === 0) {
       return res.status(404).json({ error: 'Befehl nicht gefunden' });
     }
 
-    const command = commandResult.rows[0];
+    const command = commands[0];
 
     if (command.agent_token !== agentToken) {
       return res.status(401).json({ error: 'Ungültiger Token' });
     }
 
     // Update command
-    await pool.query(
+    await pool.execute(
       `UPDATE node_commands 
-       SET status = $1, result = $2, executed_at = now()
-       WHERE id = $3`,
+       SET status = ?, result = ?, executed_at = NOW()
+       WHERE id = ?`,
       [success ? 'completed' : 'failed', JSON.stringify({ success, message, data }), commandId]
     );
 
@@ -131,8 +131,8 @@ agentRouter.post('/command-result', async (req: Request, res: Response) => {
         newStatus = 'offline';
       }
 
-      await pool.query(
-        'UPDATE server_instances SET status = $1 WHERE id = $2',
+      await pool.execute(
+        'UPDATE server_instances SET status = ? WHERE id = ?',
         [newStatus, commandData.serverId]
       );
     }
@@ -154,29 +154,30 @@ agentRouter.post('/send-log', async (req: Request, res: Response) => {
 
   try {
     // Verify agent owns this server
-    const serverResult = await pool.query(
+    const [servers] = await pool.execute<RowDataPacket[]>(
       `SELECT si.*, sn.agent_token 
        FROM server_instances si
        JOIN server_nodes sn ON si.node_id = sn.id
-       WHERE si.id = $1`,
+       WHERE si.id = ?`,
       [serverId]
     );
 
-    if (serverResult.rows.length === 0) {
+    if (servers.length === 0) {
       return res.status(404).json({ error: 'Server nicht gefunden' });
     }
 
-    const server = serverResult.rows[0];
+    const server = servers[0];
 
     if (server.agent_token !== agentToken) {
       return res.status(401).json({ error: 'Ungültiger Token' });
     }
 
     // Insert log
-    await pool.query(
-      `INSERT INTO server_logs (server_id, user_id, log_type, message)
-       VALUES ($1, $2, $3, $4)`,
-      [serverId, server.user_id, logType || 'info', message]
+    const { v4: uuidv4 } = await import('uuid');
+    await pool.execute(
+      `INSERT INTO server_logs (id, server_id, user_id, log_type, message)
+       VALUES (?, ?, ?, ?, ?)`,
+      [uuidv4(), serverId, server.user_id, logType || 'info', message]
     );
 
     res.json({ success: true });

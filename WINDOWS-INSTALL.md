@@ -47,27 +47,29 @@ docker-compose up -d
 
 ## 🔧 Option 2: Manuelle Installation
 
-### Schritt 1: PostgreSQL installieren
+### Schritt 1: MySQL installieren
 
 ```powershell
-# PostgreSQL herunterladen und installieren
-winget install PostgreSQL.PostgreSQL
-
-# Nach Installation: PostgreSQL Dienst starten (falls nicht automatisch)
-Start-Service postgresql-x64-16
+# MySQL herunterladen und installieren
+winget install Oracle.MySQL
 ```
+
+**Alternativ: MySQL Community Server manuell installieren:**
+1. Download: https://dev.mysql.com/downloads/mysql/
+2. Wähle "MySQL Installer for Windows"
+3. Installiere "MySQL Server" und "MySQL Workbench" (optional)
 
 **Datenbank einrichten:**
 
-1. Öffne **pgAdmin** (wird mit PostgreSQL installiert)
+1. Öffne **MySQL Workbench** oder **mysql** CLI
 2. Verbinde dich mit dem lokalen Server
-3. Erstelle eine neue Datenbank: `gamepanel`
-4. Erstelle einen Benutzer: `gamepanel` mit Passwort `gamepanel`
+3. Führe folgende Befehle aus:
 
-Oder via Kommandozeile (psql):
 ```sql
-CREATE USER gamepanel WITH PASSWORD 'gamepanel';
-CREATE DATABASE gamepanel OWNER gamepanel;
+CREATE DATABASE gamepanel;
+CREATE USER 'gamepanel'@'localhost' IDENTIFIED BY 'gamepanel';
+GRANT ALL PRIVILEGES ON gamepanel.* TO 'gamepanel'@'localhost';
+FLUSH PRIVILEGES;
 ```
 
 ### Schritt 2: Node.js installieren
@@ -115,7 +117,14 @@ copy .env.example .env
 ```env
 PORT=3001
 NODE_ENV=production
-DATABASE_URL=postgresql://gamepanel:gamepanel@localhost:5432/gamepanel
+
+# MySQL Verbindung
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=gamepanel
+DB_PASSWORD=gamepanel
+DB_NAME=gamepanel
+
 JWT_SECRET=HIER-EINEN-LANGEN-ZUFAELLIGEN-STRING-EINTRAGEN
 CORS_ORIGINS=http://localhost:3000,http://DEINE-SERVER-IP:3000
 BACKEND_URL=http://localhost:3001
@@ -134,7 +143,7 @@ npm run build
 npm start
 ```
 
-Wenn "Server running on port 3001" erscheint, funktioniert das Backend!
+Wenn "Database connected successfully" und "Server running on port 3001" erscheint, funktioniert das Backend!
 
 ### Schritt 6: Frontend einrichten
 
@@ -323,13 +332,13 @@ Folge dem Assistenten und wähle deine IIS-Website aus.
 
 ## 🔧 Troubleshooting
 
-### PostgreSQL Verbindungsfehler
+### MySQL Verbindungsfehler
 ```powershell
 # Prüfen ob Dienst läuft
-Get-Service postgresql*
+Get-Service MySQL*
 
 # Dienst starten
-Start-Service postgresql-x64-16
+Start-Service MySQL80
 ```
 
 ### Port bereits belegt
@@ -360,7 +369,7 @@ $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine")
 # Alles in einem Script (als Admin ausführen):
 
 # 1. Tools installieren
-winget install PostgreSQL.PostgreSQL
+winget install Oracle.MySQL
 winget install OpenJS.NodeJS.LTS
 winget install Git.Git
 
@@ -405,3 +414,22 @@ Nach der Panel-Installation kannst du Game-Server hinzufügen:
 4. Das generierte PowerShell-Script auf dem Game-Server ausführen
 
 Der Agent läuft dann als Windows-Dienst und kommuniziert mit deinem Panel.
+
+---
+
+## 🗄️ Existierenden MySQL Server verwenden
+
+Wenn du bereits einen MySQL Server hast, kannst du diesen verwenden:
+
+1. Erstelle die Datenbank und den Benutzer (siehe Schritt 1)
+2. Passe die `.env` Datei an:
+
+```env
+DB_HOST=dein-mysql-server
+DB_PORT=3306
+DB_USER=dein_benutzer
+DB_PASSWORD=dein_passwort
+DB_NAME=gamepanel
+```
+
+Das Backend erstellt die benötigten Tabellen automatisch beim ersten Start.

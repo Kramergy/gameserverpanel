@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { pool } from '../db/pool';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
+import { RowDataPacket, ResultSetHeader } from 'mysql2';
 
 export const logsRouter = Router();
 
@@ -11,17 +12,24 @@ logsRouter.get('/server/:serverId', async (req: AuthRequest, res: Response) => {
   const limit = parseInt(req.query.limit as string) || 100;
 
   try {
-    const result = await pool.query(
-      `SELECT sl.* FROM server_logs sl
-       JOIN server_instances si ON sl.server_id = si.id
-       WHERE sl.server_id = $1 AND (si.user_id = $2 OR $3 = true)
-       ORDER BY sl.created_at DESC
-       LIMIT $4`,
-      [req.params.serverId, req.userId, req.userRole === 'admin', limit]
+    const isAdmin = req.userRole === 'admin';
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      isAdmin
+        ? `SELECT sl.* FROM server_logs sl
+           JOIN server_instances si ON sl.server_id = si.id
+           WHERE sl.server_id = ?
+           ORDER BY sl.created_at DESC
+           LIMIT ?`
+        : `SELECT sl.* FROM server_logs sl
+           JOIN server_instances si ON sl.server_id = si.id
+           WHERE sl.server_id = ? AND si.user_id = ?
+           ORDER BY sl.created_at DESC
+           LIMIT ?`,
+      isAdmin ? [req.params.serverId, limit] : [req.params.serverId, req.userId, limit]
     );
 
     // Return in chronological order
-    res.json(result.rows.reverse());
+    res.json(rows.reverse());
   } catch (error) {
     console.error('Get logs error:', error);
     res.status(500).json({ error: 'Fehler beim Laden der Logs' });
@@ -31,17 +39,20 @@ logsRouter.get('/server/:serverId', async (req: AuthRequest, res: Response) => {
 // Clear logs for a server
 logsRouter.delete('/server/:serverId', async (req: AuthRequest, res: Response) => {
   try {
-    const serverCheck = await pool.query(
-      'SELECT id FROM server_instances WHERE id = $1 AND (user_id = $2 OR $3 = true)',
-      [req.params.serverId, req.userId, req.userRole === 'admin']
+    const isAdmin = req.userRole === 'admin';
+    const [serverCheck] = await pool.execute<RowDataPacket[]>(
+      isAdmin 
+        ? 'SELECT id FROM server_instances WHERE id = ?'
+        : 'SELECT id FROM server_instances WHERE id = ? AND user_id = ?',
+      isAdmin ? [req.params.serverId] : [req.params.serverId, req.userId]
     );
 
-    if (serverCheck.rows.length === 0) {
+    if (serverCheck.length === 0) {
       return res.status(404).json({ error: 'Server nicht gefunden' });
     }
 
-    await pool.query(
-      'DELETE FROM server_logs WHERE server_id = $1',
+    await pool.execute(
+      'DELETE FROM server_logs WHERE server_id = ?',
       [req.params.serverId]
     );
 

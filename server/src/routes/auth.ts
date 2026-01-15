@@ -3,6 +3,8 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { pool } from '../db/pool';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
+import { RowDataPacket, ResultSetHeader } from 'mysql2';
+import { v4 as uuidv4 } from 'uuid';
 
 export const authRouter = Router();
 
@@ -14,49 +16,48 @@ authRouter.post('/signup', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'E-Mail und Passwort erforderlich' });
   }
 
-  const client = await pool.connect();
+  const connection = await pool.getConnection();
 
   try {
-    await client.query('BEGIN');
+    await connection.beginTransaction();
 
     // Check if user exists
-    const existingUser = await client.query(
-      'SELECT id FROM users WHERE email = $1',
+    const [existingUsers] = await connection.execute<RowDataPacket[]>(
+      'SELECT id FROM users WHERE email = ?',
       [email]
     );
 
-    if (existingUser.rows.length > 0) {
-      await client.query('ROLLBACK');
+    if (existingUsers.length > 0) {
+      await connection.rollback();
       return res.status(400).json({ error: 'E-Mail bereits registriert' });
     }
 
     // Hash password
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // Create user
-    const userResult = await client.query(
-      'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id',
-      [email, passwordHash]
+    // Create user with UUID
+    const userId = uuidv4();
+    await connection.execute(
+      'INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)',
+      [userId, email, passwordHash]
     );
 
-    const userId = userResult.rows[0].id;
-
     // Create profile
-    await client.query(
-      'INSERT INTO profiles (user_id, email, username) VALUES ($1, $2, $3)',
-      [userId, email, username || null]
+    await connection.execute(
+      'INSERT INTO profiles (id, user_id, email, username) VALUES (?, ?, ?, ?)',
+      [uuidv4(), userId, email, username || null]
     );
 
     // Check if first user (make admin)
-    const userCount = await client.query('SELECT COUNT(*) FROM users');
-    const role = parseInt(userCount.rows[0].count) === 1 ? 'admin' : 'user';
+    const [userCount] = await connection.execute<RowDataPacket[]>('SELECT COUNT(*) as count FROM users');
+    const role = userCount[0].count === 1 ? 'admin' : 'user';
 
-    await client.query(
-      'INSERT INTO user_roles (user_id, role) VALUES ($1, $2)',
-      [userId, role]
+    await connection.execute(
+      'INSERT INTO user_roles (id, user_id, role) VALUES (?, ?, ?)',
+      [uuidv4(), userId, role]
     );
 
-    await client.query('COMMIT');
+    await connection.commit();
 
     // Generate JWT
     const token = jwt.sign(
@@ -71,11 +72,11 @@ authRouter.post('/signup', async (req: Request, res: Response) => {
       role
     });
   } catch (error) {
-    await client.query('ROLLBACK');
+    await connection.rollback();
     console.error('Signup error:', error);
     res.status(500).json({ error: 'Registrierung fehlgeschlagen' });
   } finally {
-    client.release();
+    connection.release();
   }
 });
 
@@ -89,16 +90,16 @@ authRouter.post('/login', async (req: Request, res: Response) => {
 
   try {
     // Get user
-    const userResult = await pool.query(
-      'SELECT id, email, password_hash FROM users WHERE email = $1',
+    const [users] = await pool.execute<RowDataPacket[]>(
+      'SELECT id, email, password_hash FROM users WHERE email = ?',
       [email]
     );
 
-    if (userResult.rows.length === 0) {
+    if (users.length === 0) {
       return res.status(401).json({ error: 'Ungültige Anmeldedaten' });
     }
 
-    const user = userResult.rows[0];
+    const user = users[0];
 
     // Verify password
     const validPassword = await bcrypt.compare(password, user.password_hash);
@@ -107,16 +108,16 @@ authRouter.post('/login', async (req: Request, res: Response) => {
     }
 
     // Get role
-    const roleResult = await pool.query(
-      'SELECT role FROM user_roles WHERE user_id = $1',
+    const [roles] = await pool.execute<RowDataPacket[]>(
+      'SELECT role FROM user_roles WHERE user_id = ?',
       [user.id]
     );
 
-    const role = roleResult.rows[0]?.role || 'user';
+    const role = roles[0]?.role || 'user';
 
     // Get profile
-    const profileResult = await pool.query(
-      'SELECT * FROM profiles WHERE user_id = $1',
+    const [profiles] = await pool.execute<RowDataPacket[]>(
+      'SELECT * FROM profiles WHERE user_id = ?',
       [user.id]
     );
 
@@ -129,7 +130,7 @@ authRouter.post('/login', async (req: Request, res: Response) => {
 
     res.json({
       user: { id: user.id, email: user.email },
-      profile: profileResult.rows[0] || null,
+      profile: profiles[0] || null,
       token,
       role
     });
@@ -142,23 +143,23 @@ authRouter.post('/login', async (req: Request, res: Response) => {
 // Get current user
 authRouter.get('/me', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const userResult = await pool.query(
-      'SELECT id, email FROM users WHERE id = $1',
+    const [users] = await pool.execute<RowDataPacket[]>(
+      'SELECT id, email FROM users WHERE id = ?',
       [req.userId]
     );
 
-    if (userResult.rows.length === 0) {
+    if (users.length === 0) {
       return res.status(404).json({ error: 'Benutzer nicht gefunden' });
     }
 
-    const profileResult = await pool.query(
-      'SELECT * FROM profiles WHERE user_id = $1',
+    const [profiles] = await pool.execute<RowDataPacket[]>(
+      'SELECT * FROM profiles WHERE user_id = ?',
       [req.userId]
     );
 
     res.json({
-      user: userResult.rows[0],
-      profile: profileResult.rows[0] || null,
+      user: users[0],
+      profile: profiles[0] || null,
       role: req.userRole
     });
   } catch (error) {

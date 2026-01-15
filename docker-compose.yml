@@ -1,23 +1,26 @@
 version: '3.8'
 
 services:
-  # PostgreSQL Database
-  postgres:
-    image: postgres:16-alpine
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
     container_name: gamepanel-db
     environment:
-      POSTGRES_USER: gamepanel
-      POSTGRES_PASSWORD: gamepanel
-      POSTGRES_DB: gamepanel
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: gamepanel
+      MYSQL_USER: gamepanel
+      MYSQL_PASSWORD: ${DB_PASSWORD:-gamepanel}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - mysql_data:/var/lib/mysql
     ports:
-      - "5432:5432"
+      - "3306:3306"
+    command: --default-authentication-plugin=mysql_native_password
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gamepanel"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s
 
   # Backend API
   backend:
@@ -28,14 +31,18 @@ services:
     environment:
       PORT: 3001
       NODE_ENV: production
-      DATABASE_URL: postgresql://gamepanel:gamepanel@postgres:5432/gamepanel
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: gamepanel
+      DB_PASSWORD: ${DB_PASSWORD:-gamepanel}
+      DB_NAME: gamepanel
       JWT_SECRET: ${JWT_SECRET:-change-this-in-production-to-a-random-string}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
       BACKEND_URL: ${BACKEND_URL:-http://localhost:3001}
     ports:
       - "3001:3001"
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
     restart: unless-stopped
 
@@ -54,4 +61,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  postgres_data:
+  mysql_data:
