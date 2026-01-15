@@ -18,19 +18,10 @@ export function useServerLogs(serverId: string | null) {
 
   // Fetch initial logs
   const fetchLogs = useCallback(async () => {
-    if (!serverId || !session?.access_token) return;
+    if (!serverId) return;
 
     setIsLoading(true);
     try {
-      const response = await supabase.functions.invoke('node-agent/stream-logs', {
-        body: null,
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`
-        },
-        method: 'GET',
-      });
-
-      // Use query params via the URL
       const { data, error } = await supabase
         .from('server_logs')
         .select('*')
