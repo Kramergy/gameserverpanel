@@ -217,57 +217,280 @@ if (-not $SkipNodeJS) {
 
 Write-Step "Schritt 4: PostgreSQL installieren"
 
-if (-not $SkipPostgres) {
-    $pgService = Get-Service -Name "postgresql*" -ErrorAction SilentlyContinue
+function Wait-ForService {
+    param(
+        [string]$ServicePattern,
+        [int]$TimeoutSeconds = 60
+    )
     
-    if (-not $pgService) {
-        Write-Info "Installiere PostgreSQL..."
-        winget install PostgreSQL.PostgreSQL --accept-source-agreements --accept-package-agreements
-        
-        # Warten bis der Dienst verfügbar ist
-        Start-Sleep -Seconds 5
-        Refresh-Path
-        
-        $pgService = Get-Service -Name "postgresql*" -ErrorAction SilentlyContinue
+    $elapsed = 0
+    while ($elapsed -lt $TimeoutSeconds) {
+        $service = Get-Service -Name $ServicePattern -ErrorAction SilentlyContinue
+        if ($service -and $service.Status -eq "Running") {
+            return $service
+        }
+        Start-Sleep -Seconds 2
+        $elapsed += 2
+        Write-Host "." -NoNewline -ForegroundColor Gray
+    }
+    Write-Host ""
+    return $null
+}
+
+function Wait-ForPostgresConnection {
+    param(
+        [string]$PsqlPath,
+        [int]$TimeoutSeconds = 30
+    )
+    
+    $elapsed = 0
+    while ($elapsed -lt $TimeoutSeconds) {
+        try {
+            $env:PGPASSWORD = "postgres"
+            $result = & $PsqlPath -U postgres -h localhost -c "SELECT 1;" 2>$null
+            $env:PGPASSWORD = ""
+            if ($LASTEXITCODE -eq 0) {
+                return $true
+            }
+        } catch {}
+        Start-Sleep -Seconds 2
+        $elapsed += 2
+        Write-Host "." -NoNewline -ForegroundColor Gray
+    }
+    Write-Host ""
+    return $false
+}
+
+function Install-PostgreSQL {
+    param(
+        [string]$DbPassword
+    )
+    
+    $pgVersion = "16"
+    $pgInstallerUrl = "https://get.enterprisedb.com/postgresql/postgresql-16.4-1-windows-x64.exe"
+    $pgInstallerPath = "$env:TEMP\postgresql-installer.exe"
+    $pgInstallDir = "C:\Program Files\PostgreSQL\$pgVersion"
+    $pgDataDir = "C:\Program Files\PostgreSQL\$pgVersion\data"
+    $pgSuperPassword = "postgres"
+    
+    Write-Info "Lade PostgreSQL $pgVersion herunter..."
+    
+    try {
+        # Download mit Progress
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri $pgInstallerUrl -OutFile $pgInstallerPath -UseBasicParsing
+        $ProgressPreference = 'Continue'
+        Write-Success "Download abgeschlossen"
+    } catch {
+        Write-Error "Download fehlgeschlagen: $_"
+        return $false
     }
     
-    if ($pgService) {
-        if ($pgService.Status -ne "Running") {
-            Write-Info "Starte PostgreSQL Dienst..."
-            Start-Service $pgService.Name
+    Write-Info "Installiere PostgreSQL (dies kann einige Minuten dauern)..."
+    Write-Info "  Installationsverzeichnis: $pgInstallDir"
+    Write-Info "  Datenverzeichnis: $pgDataDir"
+    Write-Info "  Superuser Passwort: $pgSuperPassword"
+    Write-Host ""
+    
+    # Silent Installation mit Parametern
+    $installArgs = @(
+        "--mode", "unattended",
+        "--unattendedmodeui", "minimal",
+        "--prefix", $pgInstallDir,
+        "--datadir", $pgDataDir,
+        "--superpassword", $pgSuperPassword,
+        "--serverport", "5432",
+        "--servicename", "postgresql-x64-$pgVersion",
+        "--serviceaccount", "NT AUTHORITY\NetworkService",
+        "--install_runtimes", "0"
+    )
+    
+    try {
+        $process = Start-Process -FilePath $pgInstallerPath -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
+        
+        if ($process.ExitCode -ne 0) {
+            Write-Warning "Installer Exit Code: $($process.ExitCode)"
         }
-        Write-Success "PostgreSQL läuft: $($pgService.Name)"
+    } catch {
+        Write-Error "Installation fehlgeschlagen: $_"
+        return $false
+    }
+    
+    # Installer aufräumen
+    Remove-Item $pgInstallerPath -Force -ErrorAction SilentlyContinue
+    
+    # Warten auf Service
+    Write-Info "Warte auf PostgreSQL Service"
+    $service = Wait-ForService -ServicePattern "postgresql*" -TimeoutSeconds 60
+    
+    if ($service) {
+        Write-Success "PostgreSQL Service läuft: $($service.Name)"
+        
+        # PostgreSQL bin zum PATH hinzufügen
+        $pgBinPath = "$pgInstallDir\bin"
+        if (Test-Path $pgBinPath) {
+            $env:Path = "$pgBinPath;$env:Path"
+            [System.Environment]::SetEnvironmentVariable("Path", "$pgBinPath;" + [System.Environment]::GetEnvironmentVariable("Path", "Machine"), "Machine")
+            Write-Success "PostgreSQL zum PATH hinzugefügt"
+        }
+        
+        return $true
     } else {
-        Write-Warning "PostgreSQL Dienst nicht gefunden"
-        Write-Warning "Bitte installiere PostgreSQL manuell und starte das Script erneut"
+        Write-Error "PostgreSQL Service konnte nicht gestartet werden"
+        return $false
+    }
+}
+
+function Setup-GamePanelDatabase {
+    param(
+        [string]$DbPassword
+    )
+    
+    # psql finden
+    $psqlPath = Get-ChildItem -Path "C:\Program Files\PostgreSQL" -Recurse -Filter "psql.exe" -ErrorAction SilentlyContinue | 
+                Select-Object -First 1 | 
+                Select-Object -ExpandProperty FullName
+    
+    if (-not $psqlPath) {
+        Write-Error "psql.exe nicht gefunden"
+        return $false
+    }
+    
+    Write-Info "Warte auf PostgreSQL Verbindung"
+    if (-not (Wait-ForPostgresConnection -PsqlPath $psqlPath -TimeoutSeconds 30)) {
+        Write-Error "Konnte keine Verbindung zu PostgreSQL herstellen"
+        Write-Info "Bitte prüfe ob der PostgreSQL Service läuft:"
+        Write-Info "  Get-Service postgresql* | Start-Service"
+        return $false
+    }
+    Write-Success "PostgreSQL ist erreichbar"
+    
+    Write-Info "Richte GamePanel Datenbank ein..."
+    $env:PGPASSWORD = "postgres"
+    
+    # Benutzer erstellen
+    $userExists = & $psqlPath -U postgres -h localhost -tAc "SELECT 1 FROM pg_roles WHERE rolname='gamepanel'" 2>$null
+    
+    if ($userExists.Trim() -ne "1") {
+        $result = & $psqlPath -U postgres -h localhost -c "CREATE USER gamepanel WITH PASSWORD '$DbPassword' CREATEDB;" 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Success "Benutzer 'gamepanel' erstellt (Passwort: $DbPassword)"
+        } else {
+            Write-Warning "Benutzer konnte nicht erstellt werden: $result"
+        }
+    } else {
+        Write-Info "Benutzer 'gamepanel' existiert bereits"
+    }
+    
+    # Datenbank erstellen
+    $dbExists = & $psqlPath -U postgres -h localhost -tAc "SELECT 1 FROM pg_database WHERE datname='gamepanel'" 2>$null
+    
+    if ($dbExists.Trim() -ne "1") {
+        $result = & $psqlPath -U postgres -h localhost -c "CREATE DATABASE gamepanel OWNER gamepanel;" 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Success "Datenbank 'gamepanel' erstellt"
+        } else {
+            Write-Warning "Datenbank konnte nicht erstellt werden: $result"
+        }
+    } else {
+        Write-Info "Datenbank 'gamepanel' existiert bereits"
+    }
+    
+    # Berechtigungen setzen
+    & $psqlPath -U postgres -h localhost -c "GRANT ALL PRIVILEGES ON DATABASE gamepanel TO gamepanel;" 2>$null
+    
+    $env:PGPASSWORD = ""
+    
+    # Verbindung testen
+    Write-Info "Teste Datenbankverbindung..."
+    $env:PGPASSWORD = $DbPassword
+    $testResult = & $psqlPath -U gamepanel -h localhost -d gamepanel -c "SELECT 'Connection OK';" 2>&1
+    $env:PGPASSWORD = ""
+    
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "Datenbankverbindung erfolgreich getestet"
+        return $true
+    } else {
+        Write-Warning "Datenbankverbindung fehlgeschlagen: $testResult"
+        return $false
+    }
+}
+
+if (-not $SkipPostgres) {
+    # Prüfen ob PostgreSQL bereits installiert ist
+    $pgService = Get-Service -Name "postgresql*" -ErrorAction SilentlyContinue
+    $psqlExists = Get-ChildItem -Path "C:\Program Files\PostgreSQL" -Recurse -Filter "psql.exe" -ErrorAction SilentlyContinue
+    
+    if (-not $pgService -and -not $psqlExists) {
+        Write-Info "PostgreSQL ist nicht installiert"
+        Write-Host ""
+        Write-Host "PostgreSQL Konfiguration:" -ForegroundColor Yellow
+        Write-Host "  Superuser:     postgres" -ForegroundColor Gray
+        Write-Host "  Superpasswort: postgres" -ForegroundColor Gray
+        Write-Host "  GamePanel DB:  gamepanel" -ForegroundColor Gray
+        Write-Host "  GamePanel User: gamepanel" -ForegroundColor Gray
+        Write-Host "  GamePanel Pass: $DbPassword" -ForegroundColor Gray
+        Write-Host ""
+        
+        $installPg = Read-Host "PostgreSQL jetzt automatisch installieren? (j/n)"
+        
+        if ($installPg -eq "j") {
+            if (-not (Install-PostgreSQL -DbPassword $DbPassword)) {
+                Write-Error "PostgreSQL Installation fehlgeschlagen"
+                Write-Host ""
+                Write-Host "Manuelle Installation:" -ForegroundColor Yellow
+                Write-Host "  1. Lade PostgreSQL herunter: https://www.postgresql.org/download/windows/" -ForegroundColor Gray
+                Write-Host "  2. Installiere mit Standardeinstellungen" -ForegroundColor Gray
+                Write-Host "  3. Setze Superuser Passwort auf: postgres" -ForegroundColor Gray
+                Write-Host "  4. Führe dieses Script erneut aus" -ForegroundColor Gray
+                Write-Host ""
+                exit 1
+            }
+        } else {
+            Write-Host ""
+            Write-Host "Manuelle PostgreSQL Installation:" -ForegroundColor Yellow
+            Write-Host "=================================" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "1. Download:" -ForegroundColor White
+            Write-Host "   https://www.postgresql.org/download/windows/" -ForegroundColor Cyan
+            Write-Host ""
+            Write-Host "2. Installation:" -ForegroundColor White
+            Write-Host "   - Installationsverzeichnis: C:\Program Files\PostgreSQL\16" -ForegroundColor Gray
+            Write-Host "   - Komponenten: PostgreSQL Server, Command Line Tools" -ForegroundColor Gray
+            Write-Host "   - Datenverzeichnis: Standard belassen" -ForegroundColor Gray
+            Write-Host "   - Superuser Passwort: postgres" -ForegroundColor Yellow
+            Write-Host "   - Port: 5432 (Standard)" -ForegroundColor Gray
+            Write-Host "   - Locale: German, Germany oder Default" -ForegroundColor Gray
+            Write-Host ""
+            Write-Host "3. Nach der Installation:" -ForegroundColor White
+            Write-Host "   Führe dieses Script erneut aus:" -ForegroundColor Gray
+            Write-Host "   .\scripts\install-windows.ps1" -ForegroundColor Cyan
+            Write-Host ""
+            exit 0
+        }
+    } else {
+        # PostgreSQL existiert, prüfen ob es läuft
+        if ($pgService) {
+            if ($pgService.Status -ne "Running") {
+                Write-Info "Starte PostgreSQL Dienst..."
+                try {
+                    Start-Service $pgService.Name -ErrorAction Stop
+                    Start-Sleep -Seconds 3
+                    Write-Success "PostgreSQL Dienst gestartet"
+                } catch {
+                    Write-Error "Konnte PostgreSQL nicht starten: $_"
+                    Write-Info "Versuche manuell: Start-Service $($pgService.Name)"
+                    exit 1
+                }
+            } else {
+                Write-Success "PostgreSQL läuft bereits: $($pgService.Name)"
+            }
+        }
     }
     
     # Datenbank einrichten
-    $psqlPath = Get-ChildItem -Path "C:\Program Files\PostgreSQL" -Recurse -Filter "psql.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-    
-    if ($psqlPath) {
-        Write-Info "Richte Datenbank ein..."
-        $env:PGPASSWORD = "postgres"
-        
-        # Prüfen ob User existiert
-        $userExists = & $psqlPath.FullName -U postgres -h localhost -tAc "SELECT 1 FROM pg_roles WHERE rolname='gamepanel'" 2>$null
-        
-        if ($userExists -ne "1") {
-            & $psqlPath.FullName -U postgres -h localhost -c "CREATE USER gamepanel WITH PASSWORD '$DbPassword';" 2>$null
-            Write-Success "Benutzer 'gamepanel' erstellt"
-        }
-        
-        # Prüfen ob Datenbank existiert
-        $dbExists = & $psqlPath.FullName -U postgres -h localhost -tAc "SELECT 1 FROM pg_database WHERE datname='gamepanel'" 2>$null
-        
-        if ($dbExists -ne "1") {
-            & $psqlPath.FullName -U postgres -h localhost -c "CREATE DATABASE gamepanel OWNER gamepanel;" 2>$null
-            Write-Success "Datenbank 'gamepanel' erstellt"
-        }
-        
-        $env:PGPASSWORD = ""
-    } else {
-        Write-Warning "psql nicht gefunden - Datenbank muss manuell eingerichtet werden"
+    if (-not (Setup-GamePanelDatabase -DbPassword $DbPassword)) {
+        Write-Warning "Datenbank-Setup hatte Probleme, aber wir fahren fort..."
     }
 }
 
